@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Server: ServerMain",
+            "request": "launch",
+            "mainClass": "coolmsg.server.ServerMain",
+            "projectName": "CoolMSG_JAVA_Server",
+            "cwd": "${workspaceFolder}/CoolMSG_JAVA_Server",
+            "vmArgs": "-Dfile.encoding=UTF-8"
+        },
+        {
+            "type": "java",
+            "name": "Client: MyFrame",
+            "request": "launch",
+            "mainClass": "MyFrame",
+            "projectName": "CoolMSG_JAVA_Client",
+            "cwd": "${workspaceFolder}/CoolMSG_JAVA_Client",
+            "vmArgs": "-Dfile.encoding=UTF-8"
+        }
+    ]
+}

@@ -12,11 +12,8 @@ target/
 # 로그
 *.log
 
-# Eclipse
+# Eclipse (워크스페이스 메타데이터만 제외, 프로젝트 설정 .project/.classpath/.settings는 공유)
 .metadata/
-.settings/
-.project
-.classpath
 .recommenders/
 
 # IntelliJ
@@ -33,5 +30,6 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# 실행 중 생성되는 메시지 저장 데이터 (경로 확정 후 수정)
+# 실행 중 생성되는 데이터 (서버: 메시지·첨부파일, 클라이언트: 보관함)
+# 서버 설정 CoolMSG_JAVA_Server/config/ 는 Git에 포함
 data/

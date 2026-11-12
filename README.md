@@ -12,12 +12,29 @@ Java Swing 기반 **클라이언트–서버 구조 사내 메신저**입니다.
 ## 구조
 
 ```
-CoolMsg_JAVA/
-├─ docs/      기획·설계 문서
-├─ common/    서버·클라이언트 공용 코드 (메시지 형식, 프로토콜)  ※ 예정
-├─ server/    서버 프로그램                                      ※ 예정
-└─ client/    Swing 클라이언트                                   ※ 예정
+CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 폴더)
+├─ docs/                       기획·설계 문서
+├─ CoolMSG_JAVA_Common/        서버·클라이언트 공용 코드 (패킷, 프로토콜 상수)
+│  └─ src/coolmsg/common/
+├─ CoolMSG_JAVA_Server/        서버 프로그램  → Common 참조
+│  ├─ src/coolmsg/server/
+│  ├─ config/                  관리자 설정 (users.txt, org.txt) — Git에 포함
+│  └─ data/                    실행 중 생기는 메시지·첨부파일 — Git 제외
+├─ CoolMSG_JAVA_Client/        Swing 클라이언트 → Common 참조
+│  ├─ src/
+│  └─ data/                    PC의 보낸 내역·받은 내역 — Git 제외
+└─ .vscode/launch.json         VS Code 실행·디버그 설정 (서버, 클라이언트)
 ```
+
+- 세 프로젝트 모두 Eclipse 프로젝트 형식(`.project` / `.classpath`)이고 JDK 17을 사용합니다.
+- Server와 Client는 **Common 프로젝트를 참조**해 같은 패킷·프로토콜 코드를 씁니다. Common을 고치면 양쪽에 함께 반영됩니다.
+
+## 실행 방법
+
+- **VS Code**: 저장소 루트 폴더를 열고 `Run and Debug`에서 `Server: ServerMain` 또는 `Client: MyFrame` 선택 후 F5
+  - 서버를 먼저 실행한 뒤 클라이언트를 실행합니다. 클라이언트는 여러 개 띄울 수 있습니다.
+- **Eclipse**: 저장소 루트를 워크스페이스로 열고 `File → Import → Existing Projects into Workspace`로 세 프로젝트를 모두 가져오기
+  - Common을 빼고 가져오면 Server·Client에 빌드 오류가 납니다.
 
 ## 문서
 
