@@ -18,6 +18,7 @@ import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 
 import coolmsg.common.ProtocolInfo;
+import coolmsg.server.config.ServerConfig;
 
 /**
  * [서버 상태] 탭: 서버 시작/중지, 접속자 목록, 서버 로그.
@@ -30,19 +31,21 @@ public class StatusPanel extends JPanel {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
 
+    private final ServerConfig config;
     private final JLabel stateLabel = new JLabel();
     private final JButton startStopButton = new JButton();
     private final DefaultListModel<String> onlineUsers = new DefaultListModel<>();
     private final JTextArea logArea = new JTextArea();
     private boolean running = false;
 
-    public StatusPanel() {
+    public StatusPanel(ServerConfig config) {
         super(new BorderLayout(8, 8));
+        this.config = config;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         // 위쪽: 포트, 상태, 시작/중지 버튼
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
-        top.add(new JLabel("포트: " + ProtocolInfo.DEFAULT_PORT));
+        top.add(new JLabel("포트: " + config.getPort()));
         top.add(new JLabel("프로토콜 버전: " + ProtocolInfo.VERSION));
         stateLabel.setFont(stateLabel.getFont().deriveFont(Font.BOLD));
         top.add(stateLabel);
@@ -76,7 +79,7 @@ public class StatusPanel extends JPanel {
     private void toggleServer() {
         running = !running;
         if (running) {
-            log("서버 시작 (포트 " + ProtocolInfo.DEFAULT_PORT + ") - 통신 기능은 아직 구현 전입니다.");
+            log("서버 시작 (포트 " + config.getPort() + ") - 통신 기능은 구현 2단계에서 연결합니다.");
         } else {
             log("서버 중지");
         }

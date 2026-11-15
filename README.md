@@ -8,7 +8,7 @@ Java Swing 기반 **클라이언트–서버 구조 사내 메신저**입니다.
 | 구분 | 기능 | 상태 |
 |---|---|---|
 | 서버 관리 화면 | 관리자 로그인(처음 실행 시 비밀번호 설정) | 동작 |
-| | 사용자 관리: 추가·조회·수정·삭제 | 조회만 동작 |
+| | 사용자 관리: 추가·조회·이름 수정·비밀번호 초기화·삭제·복구 | 동작 |
 | | 서버 시작·중지, 접속자·로그 표시 | 화면만 |
 | | 조직도 편집 | 예정 |
 | 메시지 | 여러 명에게 보내기(참조 포함), 오프라인 사용자에게 저장 후 전달 | 예정 |
@@ -43,14 +43,15 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 - **VS Code**: 저장소 루트 폴더를 열고 `Run and Debug`에서 `Server: ServerMain` 또는 `Client: MyFrame` 선택 후 F5
   - 서버를 먼저 실행한 뒤 클라이언트를 실행합니다. 클라이언트는 여러 개 띄울 수 있습니다.
   - 서버는 관리 화면(GUI)으로 열립니다. 처음 실행하면 관리자 비밀번호를 정하는 창이 뜨고, 이 값은 `CoolMSG_JAVA_Server/config/admin.txt`에 해시로 저장됩니다(Git 제외). 잊으면 그 파일을 지우고 다시 실행하세요.
-  - 예시 사용자(kim, lee, park, choi)의 테스트 비밀번호는 `CoolMSG_JAVA_Server/config/users.txt` 맨 위 주석에 있습니다.
+  - 예시 사용자(kim, lee, park, choi)의 테스트 비밀번호는 `CoolMSG_JAVA_Server/config/users.txt` 맨 위 주석에 있습니다. 관리 화면에서 사용자를 바꿔도 이 주석은 보존됩니다.
+  - 포트·서버 이름 등은 `CoolMSG_JAVA_Server/config/server.txt`에서 바꿉니다(서버를 다시 켜야 반영).
 - **Eclipse**: 저장소 루트를 워크스페이스로 열고 `File → Import → Existing Projects into Workspace`로 세 프로젝트를 모두 가져오기
   - Common을 빼고 가져오면 Server·Client에 빌드 오류가 납니다.
 
 ## 테스트
 
-- VS Code: `Run and Debug`에서 `Test: Common` 선택 후 F5
-- Eclipse: `CoolMSG_JAVA_Common/test/coolmsg/common/CommonTest.java` → Run As → Java Application
+- VS Code: `Run and Debug`에서 `Test: Common` 또는 `Test: Server` 선택 후 F5
+- Eclipse: `CoolMSG_JAVA_Common/test/coolmsg/common/CommonTest.java` 또는 `CoolMSG_JAVA_Server/test/coolmsg/server/ServerTest.java` → Run As → Java Application
 - 결과는 줄마다 `PASS`/`FAIL`로 나오고, 마지막 줄에 통과·실패 개수가 나옵니다. 기록은 [테스트 기록](docs/04_테스트기록.md)에 있습니다.
 
 ## 문서

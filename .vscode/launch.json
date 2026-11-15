@@ -21,6 +21,15 @@
         },
         {
             "type": "java",
+            "name": "Test: Server",
+            "request": "launch",
+            "mainClass": "coolmsg.server.ServerTest",
+            "projectName": "CoolMSG_JAVA_Server",
+            "cwd": "${workspaceFolder}/CoolMSG_JAVA_Server",
+            "vmArgs": "-Dfile.encoding=UTF-8"
+        },
+        {
+            "type": "java",
             "name": "Client: MyFrame",
             "request": "launch",
             "mainClass": "MyFrame",

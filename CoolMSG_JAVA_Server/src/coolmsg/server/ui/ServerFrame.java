@@ -7,7 +7,7 @@ import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JTabbedPane;
 
-import coolmsg.server.config.UserStore;
+import coolmsg.server.ServerContext;
 
 /**
  * 서버 관리 메인 창. 탭 3개: 서버 상태 / 사용자 관리 / 조직도 관리.
@@ -16,11 +16,11 @@ public class ServerFrame extends JFrame {
 
     private static final long serialVersionUID = 1L;
 
-    public ServerFrame(UserStore userStore) {
-        super("CoolMsg 서버 관리");
+    public ServerFrame(ServerContext context) {
+        super("CoolMsg 서버 관리 - " + context.getServerConfig().getServerName());
 
-        StatusPanel statusPanel = new StatusPanel();
-        UserPanel userPanel = new UserPanel(userStore, statusPanel);
+        StatusPanel statusPanel = new StatusPanel(context.getServerConfig());
+        UserPanel userPanel = new UserPanel(context.getUserDirectory(), statusPanel);
         OrgPanel orgPanel = new OrgPanel();
 
         JTabbedPane tabs = new JTabbedPane();
@@ -46,6 +46,11 @@ public class ServerFrame extends JFrame {
 
         setSize(900, 600);
         setLocationRelativeTo(null); // 화면 가운데
+
         statusPanel.log("관리자 로그인 완료. 서버 관리 화면을 시작합니다.");
+        for (String warning : context.getStartupWarnings()) {
+            statusPanel.log("경고: " + warning);
+        }
+        statusPanel.log("사용자 " + context.getUserDirectory().getUsers().size() + "명을 불러왔습니다.");
     }
 }
