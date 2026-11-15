@@ -1,9 +1,13 @@
 package coolmsg.client.ui;
 
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,6 +25,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.Scrollable;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 
 import coolmsg.client.ClientController;
@@ -43,7 +49,13 @@ public class ComposeFrame extends JFrame {
     /** 이 창의 메시지 ID. 다시 보내도 바뀌지 않는다. */
     private final String messageId = UUID.randomUUID().toString();
     private final Set<String> receivers = new LinkedHashSet<>();
-    private final JPanel chips = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+    /** 받는 사람 단추들. 폭이 모자라면 다음 줄로 넘어간다(WrapLayout). */
+    private final ChipPanel chips = new ChipPanel();
+    /** 받는 사람 칸: 최대 MAX_CHIP_ROWS줄까지 늘어나고, 그보다 많으면 세로 스크롤. */
+    private final JScrollPane chipsScroll;
+
+    /** 받는 사람 칸이 늘어나는 최대 줄 수. 이보다 많으면 스크롤한다. */
+    private static final int MAX_CHIP_ROWS = 3;
     private final JTextArea body = new JTextArea();
     private final JButton sendButton = new JButton("보내기");
     private final JButton pickButton = new JButton("받는 사람 선택");
@@ -55,9 +67,38 @@ public class ComposeFrame extends JFrame {
 
         JPanel top = new JPanel(new BorderLayout(6, 0));
         top.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 8));
-        top.add(new JLabel("받는 사람"), BorderLayout.WEST);
-        top.add(chips, BorderLayout.CENTER);
-        top.add(pickButton, BorderLayout.EAST);
+        chipsScroll = new JScrollPane(chips, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER) {
+            private static final long serialVersionUID = 1L;
+
+            /** 높이는 내용만큼, 단 MAX_CHIP_ROWS줄까지. 폭은 창이 정한다(작게 보고해 창 폭을 늘리지 않게). */
+            @Override
+            public Dimension getPreferredSize() {
+                Insets in = getInsets();
+                int rowHeight = new JButton("가").getPreferredSize().height + 4;
+                int content = chips.getPreferredSize().height;
+                int height = Math.min(content, rowHeight * MAX_CHIP_ROWS + 4);
+                return new Dimension(100, height + in.top + in.bottom);
+            }
+        };
+        chipsScroll.getVerticalScrollBar().setUnitIncrement(12);
+        // 창 폭이 바뀌면 줄 수가 바뀌므로 높이를 다시 계산한다
+        chipsScroll.getViewport().addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                SwingUtilities.invokeLater(() -> {
+                    chips.revalidate();
+                    top.revalidate();
+                });
+            }
+        });
+        JPanel labelBox = new JPanel(new BorderLayout());
+        labelBox.add(new JLabel("받는 사람"), BorderLayout.NORTH); // 여러 줄이어도 글자는 맨 위에
+        JPanel pickBox = new JPanel(new BorderLayout());
+        pickBox.add(pickButton, BorderLayout.NORTH);
+        top.add(labelBox, BorderLayout.WEST);
+        top.add(chipsScroll, BorderLayout.CENTER);
+        top.add(pickBox, BorderLayout.EAST);
         pickButton.addActionListener(e -> pickReceivers());
 
         body.setLineWrap(true);
@@ -74,6 +115,7 @@ public class ComposeFrame extends JFrame {
         add(bottom, BorderLayout.SOUTH);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setSize(520, 420);
+        setMinimumSize(new Dimension(380, 300)); // 이보다 좁으면 이름 단추 하나도 다 보이지 않는다
         setLocationByPlatform(true);
         updateChips();
     }
@@ -98,6 +140,44 @@ public class ComposeFrame extends JFrame {
         }
         chips.revalidate();
         chips.repaint();
+        getContentPane().revalidate(); // 줄 수가 바뀌면 받는 사람 칸 높이도 바뀐다
+    }
+
+    /**
+     * 받는 사람 단추 패널. 스크롤 창 안에서 폭은 창에 맞추고(가로 스크롤 없음) 높이만 늘어난다.
+     * 그래야 WrapLayout이 "지금 폭"으로 줄을 나눌 수 있다.
+     */
+    private static final class ChipPanel extends JPanel implements Scrollable {
+        private static final long serialVersionUID = 1L;
+
+        ChipPanel() {
+            super(new WrapLayout(FlowLayout.LEFT, 4, 2));
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+            return 12;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+            return visible.height;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true; // 폭은 보이는 영역에 맞춤 → 넘치면 다음 줄로
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
     }
 
     /** 체크 목록 창으로 받는 사람을 더하거나 뺀다. */

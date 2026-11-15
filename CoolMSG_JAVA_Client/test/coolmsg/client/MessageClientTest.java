@@ -53,6 +53,9 @@ final class MessageClientTest {
 
         section.accept("ClientController - 보내기 전 검사 (U5)");
         draftCheck();
+
+        section.accept("WrapLayout - 작성 창 받는 사람 칸 줄 바꿈 (버그 수정)");
+        wrapLayout();
     }
 
     // ===================================================================
@@ -189,6 +192,29 @@ final class MessageClientTest {
         check.accept("1MB 초과 (HTML로 바꾼 크기 기준)",
                 ClientController.checkDraft(List.of("lee"), "<".repeat(300_000)) != null);
         check.accept("정상", ClientController.checkDraft(List.of("lee"), "안녕") == null);
+    }
+
+    /** 폭이 좁아지면 줄이 늘어나 높이가 커지고, 모든 단추가 폭 안에 들어가는지. */
+    private static void wrapLayout() {
+        javax.swing.JPanel panel = new javax.swing.JPanel(new coolmsg.client.ui.WrapLayout(java.awt.FlowLayout.LEFT, 4, 2));
+        for (int i = 0; i < 10; i++) {
+            panel.add(new javax.swing.JButton("사용자" + i + " ×"));
+        }
+        javax.swing.JViewport viewport = new javax.swing.JViewport();
+        viewport.setView(panel);
+        viewport.setSize(800, 100);
+        int wide = panel.getPreferredSize().height;
+        viewport.setSize(200, 100);
+        int narrow = panel.getPreferredSize().height;
+        check.accept("좁아지면 여러 줄로 → 필요한 높이가 커짐 (예전 FlowLayout은 항상 한 줄 높이)", narrow > wide * 2);
+        panel.setSize(200, narrow);
+        panel.doLayout();
+        boolean inside = true;
+        for (java.awt.Component c : panel.getComponents()) {
+            java.awt.Rectangle r = c.getBounds();
+            inside &= r.x + r.width <= 200 && r.y + r.height <= narrow;
+        }
+        check.accept("줄을 바꾼 뒤 모든 단추가 칸 안에 보임 (잘리지 않음)", inside);
     }
 
     // ===================================================================

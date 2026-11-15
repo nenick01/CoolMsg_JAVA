@@ -54,6 +54,7 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
   - 서버는 관리 화면(GUI)으로 열립니다. 처음 실행하면 관리자 비밀번호를 정하는 창이 뜨고, 이 값은 `CoolMSG_JAVA_Server/config/admin.txt`에 해시로 저장됩니다(Git 제외). 잊으면 그 파일을 지우고 다시 실행하세요.
   - 처음 실행하면 `config/sample/`의 예시 사용자 목록·조직도가 `config/`로 복사됩니다. 예시 사용자(kim, lee, park, choi)의 테스트 비밀번호는 `CoolMSG_JAVA_Server/config/sample/users.txt` 맨 위 주석에 있습니다.
   - 관리 화면에서 바꾼 사용자 목록(`config/users.txt`)은 Git에 올라가지 않습니다.
+  - 서버에 저장된 메시지와 미전달 목록은 `CoolMSG_JAVA_Server/data/`(`messages/`, `pending/`)에 있습니다(Git 제외). 서버를 다시 켜도 유지됩니다.
   - 클라이언트는 로그인에 성공한 서버 주소·아이디를 **사용자 홈 폴더의 `.coolmsg/client.txt`**에 저장합니다(예: `C:\Users\홍길동\.coolmsg\`). 비밀번호는 저장하지 않습니다. 메시지 보관함도 이 폴더의 `{아이디}/`에 생깁니다(받은 메시지 `inbox/`, 보낸 메시지 `sent/`).
   - 포트·서버 이름 등은 `CoolMSG_JAVA_Server/config/server.txt`에서 바꿉니다(서버를 다시 켜야 반영).
 - **Eclipse**: 저장소 루트를 워크스페이스로 열고 `File → Import → Existing Projects into Workspace`로 세 프로젝트를 모두 가져오기
