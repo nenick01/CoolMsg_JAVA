@@ -9,8 +9,11 @@ Java Swing 기반 **클라이언트–서버 구조 사내 메신저**입니다.
 |---|---|---|
 | 서버 관리 화면 | 관리자 로그인(처음 실행 시 비밀번호 설정) | 동작 |
 | | 사용자 관리: 추가·조회·이름 수정·비밀번호 초기화·삭제·복구 | 동작 |
-| | 서버 시작·중지, 접속자·로그 표시 | 화면만 |
+| | 서버 시작·중지(관리 화면이 열리면 자동 시작), 연결 로그 | 동작 |
+| | 접속자 목록 | 예정 (로그인 구현 후) |
 | | 조직도 편집 | 예정 |
+| 클라이언트 | 로그인 화면, 서버 연결 테스트(서버 이름·버전·응답 시간, 실패 원인) | 동작 |
+| | 로그인 | 예정 |
 | 메시지 | 여러 명에게 보내기(참조 포함), 오프라인 사용자에게 저장 후 전달 | 예정 |
 | | 받은·보낸 내역 조회·삭제, 읽음 확인, 접속 상태 표시 | 예정 |
 | | 서식 있는 본문(글자 크기·색), 회신·전체회신 | 예정 |
@@ -27,7 +30,8 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 │  └─ src/coolmsg/common/
 ├─ CoolMSG_JAVA_Server/        서버 프로그램  → Common 참조
 │  ├─ src/coolmsg/server/
-│  ├─ config/                  관리자 설정 (users.txt, org.txt는 Git에 포함, admin.txt는 제외)
+│  ├─ config/                  설정 (server.txt만 Git에 포함, users.txt·org.txt·admin.txt는 제외)
+│  │  └─ sample/              예시 users.txt·org.txt (처음 실행 때 config/로 복사됨)
 │  └─ data/                    실행 중 생기는 메시지·첨부파일 — Git 제외
 ├─ CoolMSG_JAVA_Client/        Swing 클라이언트 → Common 참조
 │  ├─ src/
@@ -40,18 +44,21 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 
 ## 실행 방법
 
-- **VS Code**: 저장소 루트 폴더를 열고 `Run and Debug`에서 `Server: ServerMain` 또는 `Client: MyFrame` 선택 후 F5
+- **VS Code**: 저장소 루트 폴더를 열고 `Run and Debug`에서 `Server: ServerMain` 또는 `Client: ClientMain` 선택 후 F5
   - 서버를 먼저 실행한 뒤 클라이언트를 실행합니다. 클라이언트는 여러 개 띄울 수 있습니다.
+  - 서버는 관리 화면이 열리면 자동으로 접속을 받기 시작합니다(기본 포트 9000). **처음 실행할 때 Windows 방화벽 허용 창**이 뜨면, 다른 PC에서 접속하려면 허용해야 합니다(같은 PC의 `localhost`는 허용하지 않아도 됨).
+  - 클라이언트 로그인 화면의 서버 칸에는 `localhost`(같은 PC) 또는 서버 PC의 IP를 씁니다. 포트를 바꿨다면 `IP:포트`로 씁니다. [연결 테스트]로 접속 가능 여부를 확인할 수 있습니다.
   - 서버는 관리 화면(GUI)으로 열립니다. 처음 실행하면 관리자 비밀번호를 정하는 창이 뜨고, 이 값은 `CoolMSG_JAVA_Server/config/admin.txt`에 해시로 저장됩니다(Git 제외). 잊으면 그 파일을 지우고 다시 실행하세요.
-  - 예시 사용자(kim, lee, park, choi)의 테스트 비밀번호는 `CoolMSG_JAVA_Server/config/users.txt` 맨 위 주석에 있습니다. 관리 화면에서 사용자를 바꿔도 이 주석은 보존됩니다.
+  - 처음 실행하면 `config/sample/`의 예시 사용자 목록·조직도가 `config/`로 복사됩니다. 예시 사용자(kim, lee, park, choi)의 테스트 비밀번호는 `CoolMSG_JAVA_Server/config/sample/users.txt` 맨 위 주석에 있습니다.
+  - 관리 화면에서 바꾼 사용자 목록(`config/users.txt`)은 Git에 올라가지 않습니다.
   - 포트·서버 이름 등은 `CoolMSG_JAVA_Server/config/server.txt`에서 바꿉니다(서버를 다시 켜야 반영).
 - **Eclipse**: 저장소 루트를 워크스페이스로 열고 `File → Import → Existing Projects into Workspace`로 세 프로젝트를 모두 가져오기
   - Common을 빼고 가져오면 Server·Client에 빌드 오류가 납니다.
 
 ## 테스트
 
-- VS Code: `Run and Debug`에서 `Test: Common` 또는 `Test: Server` 선택 후 F5
-- Eclipse: `CoolMSG_JAVA_Common/test/coolmsg/common/CommonTest.java` 또는 `CoolMSG_JAVA_Server/test/coolmsg/server/ServerTest.java` → Run As → Java Application
+- VS Code: `Run and Debug`에서 `Test: Common`, `Test: Server`, `Test: Client` 중 선택 후 F5
+- Eclipse: 각 프로젝트의 `test/` 폴더에 있는 `CommonTest`, `ServerTest`, `ClientTest` → Run As → Java Application
 - 결과는 줄마다 `PASS`/`FAIL`로 나오고, 마지막 줄에 통과·실패 개수가 나옵니다. 기록은 [테스트 기록](docs/04_테스트기록.md)에 있습니다.
 
 ## 문서

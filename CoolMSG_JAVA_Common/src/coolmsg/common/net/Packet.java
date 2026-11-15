@@ -20,12 +20,12 @@ import coolmsg.common.file.HeaderFormat;
  */
 public class Packet {
 
-    public static final String KEY_TYPE = "type";
-    public static final String KEY_REQ_ID = "reqId";
-    public static final String KEY_REASON = "reason";
+    public static final String KEY_TYPE = HeaderKeys.TYPE;
+    public static final String KEY_REQ_ID = HeaderKeys.REQ_ID;
+    public static final String KEY_REASON = HeaderKeys.REASON;
 
     /** 로그에 찍을 때 값을 가리는 키. */
-    private static final String KEY_PASSWORD = "password";
+    private static final String KEY_PASSWORD = HeaderKeys.PASSWORD;
 
     private final String typeName;
     private final LinkedHashMap<String, String> header = new LinkedHashMap<>();

@@ -16,8 +16,8 @@ import coolmsg.server.ui.ServerFrame;
  * 서버 시작점.  설계서 3.1 시작 순서
  *
  * 1. 관리자 확인 (처음 실행이면 관리자 비밀번호 설정)
- * 2. ServerContext 생성 (server.txt, users.txt 읽기)
- * 3. 서버 관리 화면(ServerFrame) 표시
+ * 2. ServerContext 생성 (운영 파일이 없으면 예시 복사, server.txt·users.txt 읽기)
+ * 3. 서버 관리 화면(ServerFrame) 표시 → 접속 받기 자동 시작
  *
  * 작업 폴더는 CoolMSG_JAVA_Server 프로젝트 폴더여야 config/ 경로를 찾는다.
  * (Eclipse 기본값, VS Code는 launch.json의 cwd 설정)
@@ -62,5 +62,6 @@ public class ServerMain {
 
         ServerFrame frame = new ServerFrame(context);
         frame.setVisible(true);
+        frame.startServer(); // 관리 화면이 열리면 접속 받기 자동 시작 (설계서 5장 U25)
     }
 }

@@ -30,9 +30,18 @@
         },
         {
             "type": "java",
-            "name": "Client: MyFrame",
+            "name": "Client: ClientMain",
             "request": "launch",
-            "mainClass": "MyFrame",
+            "mainClass": "coolmsg.client.ClientMain",
+            "projectName": "CoolMSG_JAVA_Client",
+            "cwd": "${workspaceFolder}/CoolMSG_JAVA_Client",
+            "vmArgs": "-Dfile.encoding=UTF-8"
+        },
+        {
+            "type": "java",
+            "name": "Test: Client",
+            "request": "launch",
+            "mainClass": "coolmsg.client.ClientTest",
             "projectName": "CoolMSG_JAVA_Client",
             "cwd": "${workspaceFolder}/CoolMSG_JAVA_Client",
             "vmArgs": "-Dfile.encoding=UTF-8"

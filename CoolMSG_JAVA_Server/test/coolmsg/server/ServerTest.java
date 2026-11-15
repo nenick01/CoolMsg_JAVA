@@ -37,6 +37,8 @@ public class ServerTest {
         userDirectoryFile();
         userDirectoryConcurrency();
         serverContext();
+        sampleCopy();
+        NetTest.run(ServerTest::check, ServerTest::section);
 
         System.out.println();
         System.out.println("결과: 통과 " + passed + " / 실패 " + failed);
@@ -287,6 +289,47 @@ public class ServerTest {
     }
 
     // ===================================================================
+    // 예시 파일 복사 (U24)
+    // ===================================================================
+    private static void sampleCopy() throws Exception {
+        section("ServerContext - 운영 파일이 없으면 예시 복사 (U24)");
+        Path dir = Files.createTempDirectory("coolmsg-sample");
+        Path sample = Files.createDirectories(dir.resolve("sample"));
+        newDirectory(sample, "users.txt");
+        Files.writeString(sample.resolve("org.txt"), "D|테스트학교\n");
+
+        ServerContext ctx = ServerContext.load(dir, new AdminConfig(dir.resolve("admin.txt")));
+        check("users.txt·org.txt가 없으면 예시를 복사해 시작",
+                Files.exists(dir.resolve("users.txt")) && Files.exists(dir.resolve("org.txt"))
+                        && ctx.getUserDirectory().getUsers().size() == 2);
+        check("복사했다는 사실을 경고로 남김",
+                ctx.getStartupWarnings().stream().filter(w -> w.contains("예시")).count() == 2);
+
+        ctx.getUserDirectory().add("jung", "정다은", pw());
+        ServerContext again = ServerContext.load(dir, new AdminConfig(dir.resolve("admin.txt")));
+        check("운영 파일이 있으면 예시로 덮어쓰지 않음 (추가한 사용자 유지)",
+                again.getUserDirectory().find("jung") != null
+                        && again.getStartupWarnings().stream().noneMatch(w -> w.contains("예시")));
+        check("예시 파일은 바뀌지 않음",
+                new UserDirectoryProbe(sample.resolve("users.txt")).count() == 2);
+    }
+
+    /** 예시 파일의 사용자 수를 세는 작은 도우미. */
+    private static final class UserDirectoryProbe {
+        private final Path file;
+
+        UserDirectoryProbe(Path file) {
+            this.file = file;
+        }
+
+        int count() throws IOException {
+            UserDirectory d = new UserDirectory(file);
+            d.load();
+            return d.getUsers().size();
+        }
+    }
+
+    // ===================================================================
     // 도우미
     // ===================================================================
 
@@ -326,12 +369,12 @@ public class ServerTest {
                 StandardCharsets.UTF_8);
     }
 
-    private static void section(String name) {
+    static void section(String name) {
         System.out.println();
         System.out.println("[" + name + "]");
     }
 
-    private static void check(String name, boolean ok) {
+    static void check(String name, boolean ok) {
         if (ok) {
             passed++;
             System.out.println("  PASS  " + name);

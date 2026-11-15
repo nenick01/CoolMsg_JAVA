@@ -16,10 +16,15 @@ public class ServerFrame extends JFrame {
 
     private static final long serialVersionUID = 1L;
 
+    private final ServerContext context;
+    private final StatusPanel statusPanel;
+
     public ServerFrame(ServerContext context) {
         super("CoolMsg 서버 관리 - " + context.getServerConfig().getServerName());
+        this.context = context;
 
-        StatusPanel statusPanel = new StatusPanel(context.getServerConfig());
+        statusPanel = new StatusPanel(context.getServerConfig(), context.getServerListener());
+        context.getEvents().setTarget(statusPanel); // 서버 사건을 이 화면으로
         UserPanel userPanel = new UserPanel(context.getUserDirectory(), statusPanel);
         OrgPanel orgPanel = new OrgPanel();
 
@@ -38,6 +43,7 @@ public class ServerFrame extends JFrame {
                         "서버를 종료할까요?\n접속 중인 사용자의 연결이 모두 끊어집니다.",
                         "서버 종료", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
                 if (answer == JOptionPane.YES_OPTION) {
+                    ServerFrame.this.context.getServerListener().stop();
                     dispose();
                     System.exit(0);
                 }
@@ -52,5 +58,10 @@ public class ServerFrame extends JFrame {
             statusPanel.log("경고: " + warning);
         }
         statusPanel.log("사용자 " + context.getUserDirectory().getUsers().size() + "명을 불러왔습니다.");
+    }
+
+    /** 접속 받기를 시작한다. 화면을 띄운 뒤 부른다 (관리 화면이 열리면 자동 시작, U25). */
+    public void startServer() {
+        statusPanel.startServer();
     }
 }
