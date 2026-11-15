@@ -448,21 +448,70 @@ public class ClientController implements Connection.Listener {
     // 메시지 보내기 (ComposeFrame이 SwingWorker 안에서 부른다)
     // =====================================================================
 
-    /** 보내기 전 검사 (U5). 문제가 있으면 안내 문장, 없으면 null. 서버도 같은 검사를 다시 한다. */
-    public static String checkDraft(List<String> receivers, String plainText) {
+    /** 보내기 전 검사 (U5). 본문은 HTML. 문제가 있으면 안내 문장, 없으면 null. 서버도 같은 검사를 다시 한다. */
+    public static String checkDraft(List<String> receivers, List<String> cc, String html) {
         if (receivers.isEmpty()) {
-            return "받는 사람을 한 명 이상 선택해 주세요.";
+            return cc.isEmpty() ? "받는 사람을 한 명 이상 선택해 주세요."
+                    : "참조만으로는 보낼 수 없습니다. 받는 사람을 한 명 이상 선택해 주세요.";
         }
-        if (receivers.size() > ProtocolInfo.MAX_RECIPIENTS) {
-            return "받는 사람은 " + ProtocolInfo.MAX_RECIPIENTS + "명까지 보낼 수 있습니다.";
+        if (receivers.size() + cc.size() > ProtocolInfo.MAX_RECIPIENTS) {
+            return "받는 사람과 참조는 합쳐서 " + ProtocolInfo.MAX_RECIPIENTS + "명까지 보낼 수 있습니다.";
         }
-        if (plainText.isBlank()) {
+        if (HtmlText.isBlank(html)) {
             return "본문을 입력해 주세요.";
         }
-        if (HtmlText.fromPlain(plainText).getBytes(StandardCharsets.UTF_8).length > ProtocolInfo.MAX_BODY_BYTES) {
-            return "본문이 너무 깁니다 (1MB 이하).";
+        if (html.getBytes(StandardCharsets.UTF_8).length > ProtocolInfo.MAX_BODY_BYTES) {
+            return "본문이 너무 깁니다 (1MB 이하). 인용한 원본의 필요 없는 부분을 지워 보세요.";
         }
         return null;
+    }
+
+    // =====================================================================
+    // 회신·전체회신 (설계서 2.11, 5장 U61)
+    // =====================================================================
+
+    /**
+     * 회신할 받는 사람과 참조 (2.11 표). [0] 받는 사람, [1] 참조.
+     * 회신: 원본을 보낸 사람. 전체회신: 보낸 사람 + 원본 받는 사람(나 제외), 참조는 원본 참조(나 제외).
+     * 받는 사람이 비면(내가 나에게 보낸 메시지) 보낸 사람(나)으로.
+     */
+    public static List<List<String>> replyRecipients(MessageData original, String myId, boolean all) {
+        java.util.Set<String> to = new java.util.LinkedHashSet<>();
+        java.util.Set<String> cc = new java.util.LinkedHashSet<>();
+        to.add(original.getSender());
+        if (all) {
+            to.addAll(original.getReceivers());
+            to.remove(myId);
+            if (!original.getSender().equals(myId)) {
+                to.add(original.getSender()); // 보낸 사람은 남긴다 (나 자신이 아니면)
+            }
+            cc.addAll(original.getCc());
+            cc.remove(myId);
+            cc.removeAll(to); // 한 사람은 한 칸에만 (U60)
+        }
+        if (to.isEmpty()) {
+            to.add(original.getSender());
+        }
+        return List.of(new ArrayList<>(to), new ArrayList<>(cc));
+    }
+
+    /** 회신 본문: 맨 위 빈 입력 공간 + 원본 보낸 사람·시각 + 원본 본문(정화) (4.3, U61). 가로줄은 넣지 않는다. */
+    public String quoteHtml(MessageData original) {
+        String when = original.getSentAt() == null ? "" : MailItem.LIST_TIME.format(original.getSentAt());
+        return "<p></p><p></p>"
+                + "<p><font color=\"#666666\">보낸 사람: " + HtmlText.fromPlain(nameWithId(original.getSender()))
+                + "<br>보낸 시각: " + when + "</font></p>"
+                + HtmlText.sanitize(original.getBody());
+    }
+
+    /** 관리함 [회신]·[전체회신] (Swing 스레드). */
+    public void reply(MailItem item, boolean all) {
+        MessageData original = item.getData();
+        List<List<String>> who = replyRecipients(original, myId, all);
+        ComposeFrame f = new ComposeFrame(this, new ComposeFrame.Draft(who.get(0), who.get(1), quoteHtml(original),
+                original.getMessageId(), all ? "전체회신" : "회신"));
+        track(f);
+        f.setVisible(true);
     }
 
     /**
@@ -471,13 +520,14 @@ public class ClientController implements Connection.Listener {
      * @param messageId 작성 창이 정한 ID. 다시 보낼 때도 같은 값 (U10, U35)
      * @return 성공이면 null, 실패면 보여 줄 이유
      */
-    public String sendMessage(String messageId, List<String> receivers, String plainText) {
+    public String sendMessage(String messageId, List<String> receivers, List<String> cc, String html, String replyTo) {
         ServerApi a = api;
         Mailbox box = mailbox;
         if (a == null || box == null) {
             return "서버에 연결되어 있지 않습니다.";
         }
-        MessageData draft = new MessageData(messageId, receivers, List.of(), HtmlText.fromPlain(plainText));
+        MessageData draft = new MessageData(messageId, receivers, cc, HtmlText.sanitize(html));
+        draft.setReplyTo(replyTo); // 기록용 (2.11)
         ServerApi.SendResult r;
         try {
             r = a.send(draft);

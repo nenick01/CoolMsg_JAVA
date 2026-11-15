@@ -62,6 +62,10 @@ final class MessageClientTest {
 
         section.accept("구현 6단계 - 체크박스 조직도·ORG 요청 (2.10, U53)");
         orgCheckTree();
+
+        section.accept("구현 7단계 - 참조 검사·회신·전체회신·서식 편집기 (2.11, U58~U61)");
+        replyAndEditor();
+        newlineInNewMessage();
     }
 
     // ===================================================================
@@ -193,11 +197,127 @@ final class MessageClientTest {
     }
 
     private static void draftCheck() {
-        check.accept("받는 사람 없음", ClientController.checkDraft(List.of(), "안녕") != null);
-        check.accept("공백뿐인 본문", ClientController.checkDraft(List.of("lee"), "  \n ") != null);
-        check.accept("1MB 초과 (HTML로 바꾼 크기 기준)",
-                ClientController.checkDraft(List.of("lee"), "<".repeat(300_000)) != null);
-        check.accept("정상", ClientController.checkDraft(List.of("lee"), "안녕") == null);
+        check.accept("받는 사람 없음", ClientController.checkDraft(List.of(), List.of(), "안녕") != null);
+        check.accept("참조만 있음 (U5)", ClientController.checkDraft(List.of(), List.of("lee"), "안녕") != null);
+        check.accept("태그·공백뿐인 본문", ClientController.checkDraft(List.of("lee"), List.of(), "<p> </p><br>") != null);
+        check.accept("1MB 초과 (HTML 크기 기준)",
+                ClientController.checkDraft(List.of("lee"), List.of(), "가".repeat(400_000)) != null);
+        List<String> many = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            many.add("u" + i);
+        }
+        check.accept("받는 사람+참조 101명", ClientController.checkDraft(many, List.of("lee"), "안녕") != null);
+        check.accept("정상", ClientController.checkDraft(List.of("lee"), List.of("kim"), "<b>안녕</b>") == null);
+    }
+
+    private static void replyAndEditor() throws Exception {
+        MessageData original = new MessageData(UUID.randomUUID().toString(), List.of("lee", "kim", "park"),
+                List.of("choi", "lee"), "<b>원본</b><img src=\"http://x/track.png\">");
+        original.setSender("park");
+        original.setSentAt(LocalDateTime.of(2026, 11, 23, 15, 30, 0));
+        List<List<String>> r = ClientController.replyRecipients(original, "lee", false);
+        check.accept("회신: 받는 사람은 보낸 사람만, 참조 없음", r.get(0).equals(List.of("park")) && r.get(1).isEmpty());
+        List<List<String>> all = ClientController.replyRecipients(original, "lee", true);
+        check.accept("전체회신: 보낸 사람 + 원본 받는 사람(나 제외), 참조는 원본 참조(나 제외, 받는 사람과 겹치지 않게)",
+                all.get(0).equals(List.of("park", "kim")) && all.get(1).equals(List.of("choi")));
+        MessageData self = new MessageData(UUID.randomUUID().toString(), List.of("lee"), List.of(), "메모");
+        self.setSender("lee");
+        check.accept("나에게 보낸 메시지에 전체회신 → 받는 사람은 나",
+                ClientController.replyRecipients(self, "lee", true).get(0).equals(List.of("lee")));
+
+        TestController controller = new TestController(new ClientPaths(Files.createTempDirectory("coolmsg-quote")));
+        String quote = controller.quoteHtml(original);
+        check.accept("회신 인용: 맨 위 빈 입력 공간 + 보낸 사람·시각 + 원본(정화, 외부 이미지 제거), 가로줄 없음",
+                quote.startsWith("<p></p>") && !quote.contains("<hr>") && quote.contains("보낸 시각: 2026-11-23 15:30")
+                        && quote.contains("<b>원본</b>") && !quote.contains("img"));
+
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            coolmsg.client.ui.RichTextEditor editor = new coolmsg.client.ui.RichTextEditor();
+            editor.setHtml("<p>앞 굵게 뒤</p>");
+            javax.swing.JTextPane pane = editorPane(editor);
+            String text = textOf(pane);
+            int start = text.indexOf("굵게");
+            pane.select(start, start + 2);
+            new javax.swing.text.StyledEditorKit.BoldAction().actionPerformed(
+                    new java.awt.event.ActionEvent(pane, 0, ""));
+            pane.select(start, start + 2);
+            new javax.swing.text.StyledEditorKit.ForegroundAction("red", java.awt.Color.RED).actionPerformed(
+                    new java.awt.event.ActionEvent(pane, 0, ""));
+            String html = editor.getHtml();
+            check.accept("편집기: 고른 글자에 굵게·색 → 본문 HTML에 반영, html·body 태그 없음",
+                    html.contains("<b>") && html.toLowerCase().contains("#ff0000") && !html.contains("<body")
+                            && !html.contains("<html"));
+            check.accept("편집기 본문은 정화된 HTML (보낼 때, U59)", html.equals(coolmsg.common.model.HtmlText.sanitize(html)));
+            check.accept("한글은 숫자 참조(&#44032;)가 아니라 글자 그대로 (크기·미리보기)",
+                    html.contains("굵게") && !html.contains("&#"));
+        });
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            coolmsg.client.ui.RichTextEditor editor = new coolmsg.client.ui.RichTextEditor();
+            editor.setHtml("<p>글꼴 기울임 밑줄 취소선</p>");
+            javax.swing.JTextPane pane = editorPane(editor);
+            String text = textOf(pane);
+            pane.select(text.indexOf("글꼴"), text.indexOf("글꼴") + 2);
+            coolmsg.client.ui.RichTextEditorTestAccess.applyFont(editor, "Gulim");
+            pane.select(text.indexOf("기울임"), text.indexOf("기울임") + 3);
+            new javax.swing.text.StyledEditorKit.ItalicAction().actionPerformed(new java.awt.event.ActionEvent(pane, 0, ""));
+            pane.select(text.indexOf("밑줄"), text.indexOf("밑줄") + 2);
+            new javax.swing.text.StyledEditorKit.UnderlineAction().actionPerformed(new java.awt.event.ActionEvent(pane, 0, ""));
+            pane.select(text.indexOf("취소선"), text.indexOf("취소선") + 3);
+            javax.swing.text.SimpleAttributeSet strike = new javax.swing.text.SimpleAttributeSet();
+            javax.swing.text.StyleConstants.setStrikeThrough(strike, true);
+            ((javax.swing.text.StyledDocument) pane.getDocument()).setCharacterAttributes(pane.getSelectionStart(), 3, strike, false);
+            String html = editor.getHtml();
+            check.accept("글꼴 이름이 남음 (JDK 기본 동작은 face=\"\"로 잃어버림 → 직접 적용)",
+                    html.contains("<font face=\"Gulim\">글꼴</font>"));
+            check.accept("기울임·밑줄·취소선이 정화 뒤에도 남음",
+                    html.contains("<i>기울임</i>") && html.contains("<u>밑줄</u>") && html.contains("<strike>취소선</strike>"));
+        });
+    }
+
+    /** 처음 쓰는 메시지에서 Enter가 띄어쓰기가 되지 않는지 (버그 수정). */
+    private static void newlineInNewMessage() throws Exception {
+        javax.swing.SwingUtilities.invokeAndWait(() -> {
+            coolmsg.client.ui.RichTextEditor editor = new coolmsg.client.ui.RichTextEditor();
+            editor.setHtml("");
+            javax.swing.JTextPane pane = editorPane(editor);
+            try {
+                pane.setCaretPosition(Math.min(1, pane.getDocument().getLength()));
+                pane.getDocument().insertString(pane.getCaretPosition(), "첫줄", null);
+                pane.getActionMap().get(javax.swing.text.DefaultEditorKit.insertBreakAction)
+                        .actionPerformed(new java.awt.event.ActionEvent(pane, 0, ""));
+                pane.getDocument().insertString(pane.getCaretPosition(), "둘째줄", null);
+            } catch (javax.swing.text.BadLocationException e) {
+                throw new IllegalStateException(e);
+            }
+            String html = editor.getHtml();
+            check.accept("새 메시지에서 Enter → 문단이 나뉨 (예전: 줄바꿈 문자만 들어가 받는 쪽에서 띄어쓰기로 보임)",
+                    html.matches("(?s)\\s*<p>\\s*첫줄\\s*</p>\\s*<p>\\s*둘째줄\\s*</p>\\s*"));
+            check.accept("받는 쪽 미리보기도 두 줄", coolmsg.common.model.HtmlText.toPlain(html).strip()
+                    .replaceAll("[ \\t]*\\n\\s*", "\n").equals("첫줄\n둘째줄"));
+        });
+    }
+
+    private static javax.swing.JTextPane editorPane(java.awt.Container c) {
+        for (java.awt.Component child : c.getComponents()) {
+            if (child instanceof javax.swing.JTextPane) {
+                return (javax.swing.JTextPane) child;
+            }
+            if (child instanceof java.awt.Container) {
+                javax.swing.JTextPane found = editorPane((java.awt.Container) child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static String textOf(javax.swing.JTextPane pane) {
+        try {
+            return pane.getDocument().getText(0, pane.getDocument().getLength());
+        } catch (javax.swing.text.BadLocationException e) {
+            return "";
+        }
     }
 
     private static void receiptsAndReads() throws Exception {

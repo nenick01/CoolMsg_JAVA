@@ -54,6 +54,7 @@ public class CommonTest {
         model();
         htmlText();
         orgTree();
+        sanitize();
 
         System.out.println();
         System.out.println("결과: 통과 " + passed + " / 실패 " + failed);
@@ -424,6 +425,27 @@ public class CommonTest {
                 && OrgTree.checkDeptName("a|b") != null);
         check("부서가 없으면 맨 위 없음", OrgTree.parse(List.of("# 비어 있음", "U|학교|kim"), new java.util.ArrayList<>())
                 .getRoot() == null);
+    }
+
+    private static void sanitize() {
+        section("HtmlText.sanitize - 받은 HTML 정화 (U59)");
+        check("서식 태그는 그대로", HtmlText.sanitize("<b>굵게</b><i>기울임</i><u>밑줄</u><strike>취소</strike><br>")
+                .equals("<b>굵게</b><i>기울임</i><u>밑줄</u><strike>취소</strike><br>"));
+        check("font는 face·size·color만", HtmlText.sanitize("<font face=\"굴림\" size=\"4\" color=\"#ff0000\" onclick=\"x()\">a</font>")
+                .equals("<font face=\"굴림\" size=\"4\" color=\"#ff0000\">a</font>"));
+        check("외부 이미지·링크는 태그만 지우고 글자는 남김", HtmlText.sanitize("앞<img src=\"http://x/t.png\"><a href=\"http://x\">링크</a>뒤")
+                .equals("앞링크뒤"));
+        check("script·style은 글자까지 지움", HtmlText.sanitize("a<script>alert(1)</script>b<style>p{}</style>c").equals("abc"));
+        check("style은 허용한 항목만, url( 금지",
+                HtmlText.sanitize("<span style=\"color: red; background: url(http://x); position: absolute; font-size: 14pt\">x</span>")
+                        .equals("<span style=\"color: red; font-size: 14pt\">x</span>"));
+        check("html·head·body는 지우고 body 안쪽만", HtmlText.sanitize("<html><head><title>t</title></head><body><p>본문</p></body></html>")
+                .equals("<p>본문</p>"));
+        check("숫자 참조: 글자로 되돌리되 &lt; 등 특수 문자는 그대로, 미리보기도 글자로",
+                HtmlText.decodeNumericRefs("&#44032;&#60;&#x41;").equals("가&#60;A")
+                        && HtmlText.preview("&#44032;&#45208;", 10).equals("가나"));
+        check("주석 제거, 일반 텍스트 HTML은 그대로", HtmlText.sanitize("a<!-- 주석 -->b").equals("ab")
+                && HtmlText.sanitize(HtmlText.fromPlain("1 < 2 & 3")).equals(HtmlText.fromPlain("1 < 2 & 3")));
     }
 
     private static void section(String name) {

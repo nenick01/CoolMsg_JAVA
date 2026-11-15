@@ -36,7 +36,8 @@ import coolmsg.common.model.MessageData;
  * - 줄을 고르면 오른쪽에 머리글(보낸 사람, 받는 사람, 참조, 보낸 시각)과 본문. 별도 보기 창은 없다(U48).
  * - 받은 메시지는 고르는 즉시 읽음 (5단계에서 이때 READ).
  * - 보낸 메시지: 목록에 읽음 요약 열(1/3), 오른쪽 본문 아래에 받는 사람별 읽음 확인. 고를 때와 [새로고침] 때 STATUS로 맞춘다(5단계).
- * - 아래 단추: [새로고침](보낸 메시지 탭) [삭제](확인 창, 내 PC에서만) [닫기]. 회신·전달은 7단계.
+ * - 아래 단추: [회신] [전체회신](받은 메시지 탭, 7단계) [새로고침](보낸 메시지 탭) [삭제](확인 창, 내 PC에서만) [닫기].
+ *   [전달]은 첨부파일과 함께 보류. 본문은 보여 주기 전에 정화한다(U59).
  * 목록은 컨트롤러가 refresh()로 다시 채운다. Swing 스레드에서만 쓴다.
  */
 public class MessageManagerFrame extends JFrame {
@@ -57,6 +58,8 @@ public class MessageManagerFrame extends JFrame {
     private final JEditorPane detail = new JEditorPane("text/html", EMPTY_HTML);
     private final JButton deleteButton = new JButton("삭제");
     private final JButton refreshButton = new JButton("새로고침");
+    private final JButton replyButton = new JButton("회신");
+    private final JButton replyAllButton = new JButton("전체회신");
     /** 오른쪽에 지금 보여 주는 메시지 ID와 HTML (같으면 다시 그리지 않아 스크롤 위치를 지킨다). */
     private String shownId;
     private String shownHtml;
@@ -92,7 +95,11 @@ public class MessageManagerFrame extends JFrame {
             }
         });
         close.addActionListener(e -> dispose());
+        replyButton.addActionListener(e -> reply(false));
+        replyAllButton.addActionListener(e -> reply(true));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttons.add(replyButton);
+        buttons.add(replyAllButton);
         buttons.add(refreshButton);
         buttons.add(deleteButton);
         buttons.add(close);
@@ -164,6 +171,10 @@ public class MessageManagerFrame extends JFrame {
         deleteButton.setEnabled(item != null);
         refreshButton.setVisible(!inbox);
         refreshButton.setEnabled(item != null);
+        replyButton.setVisible(inbox); // 회신은 받은 메시지에만 (4.3)
+        replyAllButton.setVisible(inbox);
+        replyButton.setEnabled(item != null);
+        replyAllButton.setEnabled(item != null);
         if (item == null) {
             if (shownId != null) {
                 shownId = null;
@@ -192,7 +203,8 @@ public class MessageManagerFrame extends JFrame {
     private String toHtml(MailItem item, boolean inbox) {
         MessageData d = item.getData();
         StringBuilder sb = new StringBuilder();
-        sb.append("<html><body style='font-family:sans-serif; margin:0'>");
+        sb.append("<html><head><style>").append(RichTextEditor.PARAGRAPH_RULE)
+                .append("</style></head><body style='font-family:sans-serif; margin:0'>"); // 줄 간격은 편집기와 같게
         sb.append("<table width='100%' cellpadding='4' cellspacing='0' bgcolor='#F3F6FA'>");
         row(sb, "보낸 사람", controller.nameWithId(d.getSender()));
         row(sb, "받는 사람", controller.namesWithIds(d.getReceivers()));
@@ -201,7 +213,7 @@ public class MessageManagerFrame extends JFrame {
         }
         row(sb, "보낸 시각", d.getSentAt() == null ? "" : MailItem.LIST_TIME.format(d.getSentAt()));
         sb.append("</table><hr>");
-        sb.append("<div style='padding:6px'>").append(d.getBody()).append("</div>");
+        sb.append("<div style='padding:6px'>").append(HtmlText.sanitize(d.getBody())).append("</div>"); // 정화 (U59)
         if (!inbox) {
             appendReadStatus(sb, item);
         }
@@ -242,6 +254,13 @@ public class MessageManagerFrame extends JFrame {
     private static void row(StringBuilder sb, String label, String value) {
         sb.append("<tr><td width='70' valign='top'><b>").append(label).append("</b></td><td>")
                 .append(HtmlText.fromPlain(value)).append("</td></tr>");
+    }
+
+    private void reply(boolean all) {
+        MailItem item = selectedItem();
+        if (item != null && inboxSelected()) {
+            controller.reply(item, all);
+        }
     }
 
     private void deleteSelected() {
