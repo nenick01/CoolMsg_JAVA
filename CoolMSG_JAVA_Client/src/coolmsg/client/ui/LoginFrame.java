@@ -5,6 +5,8 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.util.Arrays;
+import java.util.concurrent.ExecutionException;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -14,7 +16,10 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
+import javax.swing.SwingWorker;
 
+import coolmsg.client.ClientController;
+import coolmsg.client.ClientController.LoginOutcome;
 import coolmsg.client.net.ServerAddress;
 
 /**
@@ -27,18 +32,26 @@ import coolmsg.client.net.ServerAddress;
  *    [연결 테스트]   [로그인]
  * </pre>
  *
- * 구현 2단계: [연결 테스트]만 동작한다. [로그인]은 3단계에서 연결한다.
+ * 로그인은 최대 10초 이상 걸릴 수 있으므로 SwingWorker로 다른 스레드에서 하고, 그동안 버튼을 막는다.
+ * 통신은 직접 하지 않고 ClientController에 맡긴다.
  */
 public class LoginFrame extends JFrame {
 
     private static final long serialVersionUID = 1L;
 
-    private final JTextField serverField = new JTextField("localhost", 18);
-    private final JTextField idField = new JTextField(18);
+    private final ClientController controller;
+    private final JTextField serverField;
+    private final JTextField idField;
     private final JPasswordField passwordField = new JPasswordField(18);
+    private final JButton testButton = new JButton("연결 테스트");
+    private final JButton loginButton = new JButton("로그인");
+    private final JLabel statusLabel = new JLabel(" ");
 
-    public LoginFrame() {
+    public LoginFrame(ClientController controller, String server, String userId) {
         super("CoolMsg");
+        this.controller = controller;
+        this.serverField = new JTextField(server, 18);
+        this.idField = new JTextField(userId, 18);
 
         JPanel form = new JPanel(new GridBagLayout());
         form.setBorder(BorderFactory.createEmptyBorder(16, 16, 8, 16));
@@ -52,25 +65,29 @@ public class LoginFrame extends JFrame {
         hint.anchor = GridBagConstraints.WEST;
         form.add(new JLabel("<html><small>예: 192.168.0.10 또는 192.168.0.10:9100</small></html>"), hint);
 
-        JButton testButton = new JButton("연결 테스트");
-        JButton loginButton = new JButton("로그인");
         testButton.addActionListener(e -> testConnection());
-        loginButton.addActionListener(e -> JOptionPane.showMessageDialog(this,
-                "로그인은 구현 3단계에서 연결합니다.", "준비 중", JOptionPane.INFORMATION_MESSAGE));
+        loginButton.addActionListener(e -> login());
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 8));
         buttons.add(testButton);
         buttons.add(loginButton);
+        JPanel south = new JPanel(new BorderLayout());
+        south.add(statusLabel, BorderLayout.NORTH);
+        south.add(buttons, BorderLayout.SOUTH);
+        statusLabel.setHorizontalAlignment(JLabel.CENTER);
 
         setLayout(new BorderLayout());
         add(form, BorderLayout.CENTER);
-        add(buttons, BorderLayout.SOUTH);
+        add(south, BorderLayout.SOUTH);
         getRootPane().setDefaultButton(loginButton);
 
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE); // 로그인 전이라 연결이 없으므로 바로 종료
         pack();
         setResizable(false);
         setLocationRelativeTo(null);
+        if (!userId.isEmpty()) {
+            passwordField.requestFocusInWindow(); // 아이디가 채워져 있으면 비밀번호부터
+        }
     }
 
     private static void addRow(JPanel panel, int row, String label, JTextField field) {
@@ -85,16 +102,78 @@ public class LoginFrame extends JFrame {
         panel.add(field, c);
     }
 
-    /** [연결 테스트]: 서버 칸을 해석하고 테스트 창을 띄운다. */
-    private void testConnection() {
-        ServerAddress address;
+    /** 서버 칸을 해석한다. 틀리면 안내하고 null. */
+    private ServerAddress parseServer() {
         try {
-            address = ServerAddress.parse(serverField.getText());
+            return ServerAddress.parse(serverField.getText());
         } catch (IllegalArgumentException e) {
             JOptionPane.showMessageDialog(this, e.getMessage(), "서버 주소 확인", JOptionPane.WARNING_MESSAGE);
             serverField.requestFocus();
+            return null;
+        }
+    }
+
+    /** [연결 테스트]: 테스트 창을 띄운다. */
+    private void testConnection() {
+        ServerAddress address = parseServer();
+        if (address != null) {
+            new ConnectionTestDialog(this, address).setVisible(true);
+        }
+    }
+
+    /** [로그인]: 입력을 확인하고 SwingWorker로 로그인한다. */
+    private void login() {
+        ServerAddress address = parseServer();
+        if (address == null) {
             return;
         }
-        new ConnectionTestDialog(this, address).setVisible(true);
+        String userId = idField.getText().strip();
+        char[] password = passwordField.getPassword();
+        if (userId.isEmpty() || password.length == 0) {
+            JOptionPane.showMessageDialog(this, "아이디와 비밀번호를 입력하세요.", "입력 확인", JOptionPane.WARNING_MESSAGE);
+            Arrays.fill(password, '\0');
+            return;
+        }
+        String serverText = serverField.getText();
+        setBusy(true);
+
+        new SwingWorker<LoginOutcome, Void>() {
+            @Override
+            protected LoginOutcome doInBackground() {
+                try {
+                    return controller.login(address, userId, password); // Swing 스레드가 아닌 곳에서 통신
+                } finally {
+                    Arrays.fill(password, '\0'); // 메모리에 비밀번호가 남지 않게
+                }
+            }
+
+            @Override
+            protected void done() { // Swing 스레드
+                setBusy(false);
+                LoginOutcome outcome;
+                try {
+                    outcome = get();
+                } catch (InterruptedException | ExecutionException e) {
+                    JOptionPane.showMessageDialog(LoginFrame.this, "로그인 중 오류: " + e, "로그인 실패",
+                            JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+                if (outcome.ok) {
+                    passwordField.setText("");
+                    controller.onLoginSucceeded(serverText, outcome);
+                } else {
+                    passwordField.setText("");
+                    JOptionPane.showMessageDialog(LoginFrame.this, outcome.message, "로그인 실패",
+                            JOptionPane.WARNING_MESSAGE);
+                    passwordField.requestFocus();
+                }
+            }
+        }.execute();
+    }
+
+    private void setBusy(boolean busy) {
+        loginButton.setEnabled(!busy);
+        testButton.setEnabled(!busy);
+        statusLabel.setText(busy ? "로그인 중…" : " ");
     }
 }

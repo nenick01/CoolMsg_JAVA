@@ -39,6 +39,8 @@ public class ClientTest {
     public static void main(String[] args) throws Exception {
         serverAddress();
         connectionTester();
+        LoginTest.run(ClientTest::check, ClientTest::section);
+        MessageClientTest.run(ClientTest::check, ClientTest::section);
 
         System.out.println();
         System.out.println("결과: 통과 " + passed + " / 실패 " + failed);
@@ -137,12 +139,12 @@ public class ClientTest {
     }
 
     // ===================================================================
-    private static void section(String name) {
+    static void section(String name) {
         System.out.println();
         System.out.println("[" + name + "]");
     }
 
-    private static void check(String name, boolean ok) {
+    static void check(String name, boolean ok) {
         if (ok) {
             passed++;
             System.out.println("  PASS  " + name);

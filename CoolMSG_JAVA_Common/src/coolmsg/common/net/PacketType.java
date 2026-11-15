@@ -40,7 +40,9 @@ public enum PacketType {
     // ----- 서버 → 클라이언트 (서버가 먼저 보냄) -----
     MSG,
     PRESENCE,
-    RECEIPT;
+    RECEIPT,
+    /** 서버가 연결을 끊기 직전에 이유(reason)를 알림: 다른 곳에서 로그인, 계정 삭제, 서버 중지 (설계서 5장 U30). */
+    BYE;
 
     private final boolean request;
     private final boolean allowedBeforeLogin;

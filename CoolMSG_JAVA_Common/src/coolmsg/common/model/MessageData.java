@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import coolmsg.common.FormatException;
 import coolmsg.common.file.TimeFormat;
@@ -29,6 +30,10 @@ public class MessageData {
     public static final String KEY_REPLY_TO = "replyTo";
     public static final String KEY_FORWARD_OF = "forwardOf";
     public static final String KEY_ATTACHMENT_PREFIX = "attachment.";
+
+    /** messageId 형식: UUID (16진수 소문자 8-4-4-4-12). java.util.UUID.randomUUID().toString()과 같은 모양 (U35). */
+    private static final Pattern UUID_PATTERN =
+            Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
 
     private final String messageId;
     private final List<String> receivers;
@@ -54,6 +59,14 @@ public class MessageData {
         this.receivers = List.copyOf(receivers); // 밖에서 목록을 고쳐도 영향 없게 복사 (읽기 전용)
         this.cc = List.copyOf(cc);
         this.body = body;
+    }
+
+    /**
+     * messageId가 UUID 형식인가 (U35). 서버·클라이언트 모두 파일 이름으로 쓰므로,
+     * "../" 같은 값으로 다른 위치에 쓰는 일을 막기 위해 저장 전에 확인한다.
+     */
+    public static boolean isValidMessageId(String id) {
+        return id != null && UUID_PATTERN.matcher(id).matches();
     }
 
     // ---------- 헤더 변환 ----------

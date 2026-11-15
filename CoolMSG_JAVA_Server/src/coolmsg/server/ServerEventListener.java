@@ -1,5 +1,7 @@
 package coolmsg.server;
 
+import java.util.List;
+
 /**
  * 서버 내부(통신·서비스)가 관리 화면에 알리는 약속 (설계서 3.1).
  *
@@ -15,4 +17,13 @@ public interface ServerEventListener {
 
     /** 접속 받기가 시작·중지됨. */
     void onServerStateChanged(boolean running);
+
+    /**
+     * 로그인한 사용자 목록이 바뀜 (구현 3단계).
+     * 기본 구현은 아무것도 하지 않는다. 관심 있는 화면만 다시 정의한다.
+     *
+     * @param onlineUserIds 지금 로그인해 있는 아이디들 (복사본)
+     */
+    default void onOnlineUsersChanged(List<String> onlineUserIds) {
+    }
 }

@@ -17,9 +17,12 @@ import javax.swing.ListSelectionModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
+import coolmsg.server.ServerEventListener;
 import coolmsg.server.config.UserAccount;
 import coolmsg.server.config.UserDirectory;
 import coolmsg.server.config.UserDirectoryException;
+import coolmsg.server.net.CloseReason;
+import coolmsg.server.net.SessionRegistry;
 
 /**
  * [사용자 관리] 탭 (설계서 3.5, REQ-F-203~206, 212).
@@ -29,14 +32,18 @@ import coolmsg.server.config.UserDirectoryException;
  *   입력 규칙 위반(UserDirectoryException)과 파일 저장 실패(IOException)를 구분해 안내한다.
  * - 삭제된 사용자도 등록 순서 자리에 회색으로 보이며 [복구]만 쓸 수 있다(U18).
  * - [새로고침]은 메모리의 목록을 다시 그리기만 한다(U23).
+ * - 상태 열: 삭제됨 / 접속 중. 로그인·로그아웃이 생기면 자동으로 다시 그린다.
+ * - 접속 중인 사용자를 삭제하면 BYE("계정이 삭제되었습니다")를 보내고 연결을 끊는다(U30).
  */
-public class UserPanel extends JPanel {
+public class UserPanel extends JPanel implements ServerEventListener {
 
     private static final long serialVersionUID = 1L;
     private static final String[] COLUMNS = {"순서", "아이디", "이름", "비밀번호", "상태"};
     private static final int COL_ID = 1;
+    public static final String USER_DELETED_MESSAGE = "관리자가 계정을 삭제하여 연결이 끊겼습니다.";
 
     private final UserDirectory directory;
+    private final SessionRegistry sessions;
     private final StatusPanel status;
     private final DefaultTableModel model = new DefaultTableModel(COLUMNS, 0) {
         private static final long serialVersionUID = 1L;
@@ -55,9 +62,10 @@ public class UserPanel extends JPanel {
     private final JButton restoreButton = new JButton("복구");
     private final JButton refreshButton = new JButton("새로고침");
 
-    public UserPanel(UserDirectory directory, StatusPanel status) {
+    public UserPanel(UserDirectory directory, SessionRegistry sessions, StatusPanel status) {
         super(new BorderLayout(8, 8));
         this.directory = directory;
+        this.sessions = sessions;
         this.status = status;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
@@ -96,7 +104,8 @@ public class UserPanel extends JPanel {
         int selectRow = -1;
         for (UserAccount u : users) {
             // 비밀번호는 해시만 있으므로 원문을 보여 줄 수 없다. 설정 여부만 표시한다.
-            model.addRow(new Object[] {order, u.getId(), u.getName(), "●●●● (설정됨)", u.isDeleted() ? "삭제됨" : ""});
+            String state = u.isDeleted() ? "삭제됨" : (sessions.isOnline(u.getId()) ? "접속 중" : "");
+            model.addRow(new Object[] {order, u.getId(), u.getName(), "●●●● (설정됨)", state});
             if (u.getId().equals(selectId)) {
                 selectRow = order - 1;
             }
@@ -207,6 +216,7 @@ public class UserPanel extends JPanel {
         }
         try {
             directory.delete(u.getId());
+            sessions.kick(u.getId(), USER_DELETED_MESSAGE, CloseReason.USER_DELETED); // 접속 중이면 끊기 (C7: 삭제 표시 먼저)
             status.log("사용자 삭제: " + u.getId());
             refresh(u.getId());
         } catch (UserDirectoryException e) {
@@ -248,6 +258,28 @@ public class UserPanel extends JPanel {
                 input.clear();
             }
         }
+    }
+
+    // =====================================================================
+    // ServerEventListener — 로그인·로그아웃이 생기면 상태 열을 다시 그린다 (소켓 스레드에서 불림)
+    // =====================================================================
+
+    @Override
+    public void onLog(String message) {
+        // 로그는 [서버 상태] 탭이 보여 준다
+    }
+
+    @Override
+    public void onServerStateChanged(boolean running) {
+        // 상태 열은 로그인 목록 변화로만 바뀐다
+    }
+
+    @Override
+    public void onOnlineUsersChanged(List<String> onlineUserIds) {
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            UserAccount selected = selected();
+            refresh(selected == null ? null : selected.getId());
+        });
     }
 
     /** 새 비밀번호로 실행할 동작 (초기화, 복구). */

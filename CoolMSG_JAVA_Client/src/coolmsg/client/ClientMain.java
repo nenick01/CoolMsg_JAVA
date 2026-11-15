@@ -3,12 +3,12 @@ package coolmsg.client;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
-import coolmsg.client.ui.LoginFrame;
+import coolmsg.client.store.ClientPaths;
 
 /**
  * 클라이언트 시작점 (설계서 4.1).
  *
- * 구현 2단계: 로그인 화면과 서버 연결 테스트. 로그인은 3단계에서 연결한다.
+ * 저장 위치는 사용자 홈 폴더의 .coolmsg/ (U34). 화면 전환과 종료는 ClientController가 맡는다.
  */
 public class ClientMain {
 
@@ -20,7 +20,7 @@ public class ClientMain {
             } catch (Exception ignored) {
                 // 실패하면 Java 기본 모양으로 진행
             }
-            new LoginFrame().setVisible(true);
+            new ClientController(ClientPaths.inUserHome()).start();
         });
     }
 }

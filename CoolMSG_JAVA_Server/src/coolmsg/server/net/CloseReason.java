@@ -10,7 +10,10 @@ public enum CloseReason {
     FORMAT_ERROR("패킷 형식 오류"),
     QUEUE_FULL("보내기 대기열이 가득 참 (클라이언트가 너무 느림)"),
     IO_ERROR("통신 오류"),
-    SERVER_STOP("서버 중지");
+    SERVER_STOP("서버 중지"),
+    LOGOUT("로그아웃"),
+    DUPLICATE_LOGIN("다른 곳에서 같은 아이디로 로그인"),
+    USER_DELETED("관리자가 계정을 삭제");
 
     private final String description;
 

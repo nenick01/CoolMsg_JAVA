@@ -8,8 +8,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import coolmsg.common.FormatException;
+import coolmsg.common.ProtocolInfo;
+import coolmsg.common.net.HeaderKeys;
 import coolmsg.common.net.Packet;
 import coolmsg.common.net.PacketReader;
+import coolmsg.common.net.PacketType;
 import coolmsg.server.ServerEventListener;
 
 /**
@@ -17,15 +20,19 @@ import coolmsg.server.ServerEventListener;
  *
  * 받기 스레드: 패킷을 읽어 RequestDispatcher에 넘기고, 돌아온 응답을 보내기 대기열에 넣는다.
  * 닫히는 경우:
- *   - 상대가 연결을 닫음(EOFException)
+ *   - 상대가 연결을 닫음(EOFException), 로그아웃
  *   - 일정 시간(기본 90초) 동안 패킷이 없음(SocketTimeoutException) — 하트비트가 끊긴 경우
  *   - 패킷 형식 오류(FormatException) — 스트림 위치가 어긋났으므로 더 읽을 수 없음
- *   - 보내기 대기열 가득, 통신 오류, 서버 중지
+ *   - 보내기 대기열 가득, 통신 오류
+ *   - 서버가 끊음(kick): 다른 곳에서 로그인, 계정 삭제, 서버 중지 — BYE로 이유를 먼저 알린다(U30)
  * close()는 여러 스레드에서 동시에 불려도 한 번만 실행된다(AtomicBoolean).
  */
 public class ClientSession {
 
-    public static final int DEFAULT_IDLE_TIMEOUT_MILLIS = coolmsg.common.ProtocolInfo.IDLE_TIMEOUT_MILLIS;
+    public static final int DEFAULT_IDLE_TIMEOUT_MILLIS = ProtocolInfo.IDLE_TIMEOUT_MILLIS;
+
+    /** kick 때 BYE를 보내고 연결을 닫기까지 기다리는 최대 시간. 클라이언트가 읽지 않아도 이 시간 뒤에는 닫는다. */
+    static final int KICK_FLUSH_MILLIS = 2000;
 
     private static final AtomicLong SEQUENCE = new AtomicLong();
 
@@ -39,8 +46,9 @@ public class ClientSession {
     private final ServerEventListener events;
     private final Thread readThread;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicBoolean kicking = new AtomicBoolean(false);
 
-    /** 로그인한 아이디. 로그인 전에는 null (구현 3단계). */
+    /** 로그인한 아이디. 로그인 전에는 null. SessionRegistry가 잠금 안에서 정한다. */
     private volatile String userId;
 
     public ClientSession(Socket socket, int idleTimeoutMillis, int queueCapacity, RequestDispatcher dispatcher,
@@ -82,7 +90,7 @@ public class ClientSession {
                 close(CloseReason.FORMAT_ERROR);
                 return;
             } catch (IOException e) {
-                close(closed.get() ? CloseReason.SERVER_STOP : CloseReason.IO_ERROR);
+                close(CloseReason.IO_ERROR); // 이미 닫혔으면 close()가 아무것도 하지 않는다
                 return;
             }
             Packet reply = dispatcher.dispatch(this, request);
@@ -97,6 +105,24 @@ public class ClientSession {
         return sendQueue.offer(packet);
     }
 
+    /**
+     * 서버가 이 연결을 끊는다: BYE(이유)를 보내고, 다 보내면(최대 2초) 연결을 닫는다 (U30).
+     * 부른 스레드는 기다리지 않는다(닫기는 별도 스레드에서). 여러 번 불러도 한 번만 실행된다.
+     */
+    public void kick(String reasonForUser, CloseReason closeReason) {
+        if (closed.get() || !kicking.compareAndSet(false, true)) {
+            return;
+        }
+        sendQueue.offer(new Packet(PacketType.BYE).put(HeaderKeys.REASON, reasonForUser));
+        sendQueue.finish();
+        Thread closer = new Thread(() -> {
+            sendQueue.awaitFinished(KICK_FLUSH_MILLIS);
+            close(closeReason);
+        }, "kick-" + id);
+        closer.setDaemon(true);
+        closer.start();
+    }
+
     /** 연결을 닫는다. 처음 한 번만 실행된다. */
     public void close(CloseReason reason) {
         if (!closed.compareAndSet(false, true)) {
@@ -108,8 +134,23 @@ public class ClientSession {
         } catch (IOException ignored) {
             // 이미 닫힌 경우
         }
-        registry.remove(this);
-        events.onLog("연결 닫힘 #" + id + " (" + remoteAddress + "): " + reason.getDescription());
+        String who = (userId == null) ? "" : " " + userId;
+        registry.remove(this); // 로그인해 있었다면 "지금 이 연결일 때만" 아이디 목록에서도 뺀다 (C3)
+        events.onLog("연결 닫힘 #" + id + who + " (" + remoteAddress + "): " + reason.getDescription());
+    }
+
+    /** 보내기 대기열에 쌓인 패킷 수와 최대치 (밀린 메시지 속도 조절, U36). */
+    int queuedCount() {
+        return sendQueue.size();
+    }
+
+    int queueCapacity() {
+        return sendQueue.getCapacity();
+    }
+
+    /** SessionRegistry가 로그인 처리 잠금 안에서 부른다. */
+    void setUserId(String userId) {
+        this.userId = userId;
     }
 
     public long getId() {

@@ -25,6 +25,8 @@ import coolmsg.server.ui.ServerFrame;
 public class ServerMain {
 
     private static final Path CONFIG_DIR = Paths.get("config");
+    /** 메시지·미전달 색인 저장 위치 (설계서 3.2). git에 올리지 않는다(.gitignore). */
+    private static final Path DATA_DIR = Paths.get("data");
 
     public static void main(String[] args) {
         // Swing 화면은 Swing 전용 스레드(이벤트 디스패치 스레드)에서 만들어야 한다.
@@ -47,7 +49,7 @@ public class ServerMain {
 
         ServerContext context;
         try {
-            context = ServerContext.load(CONFIG_DIR, admin);
+            context = ServerContext.load(CONFIG_DIR, DATA_DIR, admin);
         } catch (IOException e) {
             // users.txt가 있는데 읽지 못함 → 빈 목록으로 시작하면 덮어써질 수 있으므로 중단 (설계서 5장 U22)
             JOptionPane.showMessageDialog(null,

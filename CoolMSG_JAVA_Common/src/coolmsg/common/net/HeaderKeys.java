@@ -24,6 +24,10 @@ public final class HeaderKeys {
     public static final String USER_ID = "userId";
     /** LOGIN (로그에서는 Packet.toString이 값을 가린다) */
     public static final String PASSWORD = "password";
+    /** 메시지 ID (SEND_OK, ACK, READ, STATUS 등). MessageData.KEY_MESSAGE_ID와 같은 값. */
+    public static final String MESSAGE_ID = "messageId";
+    /** 서버가 정한 보낸 시각 (SEND_OK). MessageData.KEY_SENT_AT과 같은 값. */
+    public static final String SENT_AT = "sentAt";
 
     private HeaderKeys() {
     }

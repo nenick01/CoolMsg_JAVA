@@ -62,19 +62,42 @@ public class SendQueue {
         return true;
     }
 
-    /** 대기 중인 패킷 수 (테스트·로그용). */
+    /** 최대로 쌓을 수 있는 패킷 수. */
+    public int getCapacity() {
+        return capacity;
+    }
+
+    /** 대기 중인 패킷 수 (밀린 메시지 보내기 속도 조절, 테스트용). */
     public int size() {
         return queue.size();
     }
 
     /** 대기열을 비우고 보내기 스레드를 멈춘다. 여러 번 불러도 된다. */
     public void close() {
+        closed = true;
+        queue.clear();
+        queue.offer(STOP);
+    }
+
+    /**
+     * 더 이상 받지 않고, 이미 넣은 패킷은 끝까지 보낸 뒤 스레드를 멈춘다.
+     * 연결을 끊기 직전에 BYE를 실제로 전달하기 위해 쓴다(U30). close()는 남은 패킷을 버린다.
+     */
+    public void finish() {
         if (closed) {
             return;
         }
         closed = true;
-        queue.clear();
-        queue.offer(STOP);
+        queue.offer(STOP); // 용량 + 1로 만들었으므로 가득 차도 STOP은 들어간다
+    }
+
+    /** 보내기 스레드가 끝나기를 최대 millis만큼 기다린다. */
+    public void awaitFinished(long millis) {
+        try {
+            thread.join(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private void run() {

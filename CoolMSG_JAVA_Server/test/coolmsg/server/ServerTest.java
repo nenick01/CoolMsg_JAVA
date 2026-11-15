@@ -39,6 +39,7 @@ public class ServerTest {
         serverContext();
         sampleCopy();
         NetTest.run(ServerTest::check, ServerTest::section);
+        MessageTest.run(ServerTest::check, ServerTest::section);
 
         System.out.println();
         System.out.println("결과: 통과 " + passed + " / 실패 " + failed);
@@ -275,7 +276,7 @@ public class ServerTest {
         Path dir = Files.createTempDirectory("coolmsg-context");
         newDirectory(dir, "users.txt");
         Files.writeString(dir.resolve("server.txt"), "port=9200\nport=abc\n");
-        ServerContext ctx = ServerContext.load(dir, new AdminConfig(dir.resolve("admin.txt")));
+        ServerContext ctx = ServerContext.load(dir, dir.resolve("data"), new AdminConfig(dir.resolve("admin.txt")));
         check("설정·사용자 목록을 하나씩 만들어 들고 있음",
                 ctx.getServerConfig().getPort() == 9000 && ctx.getUserDirectory().getUsers().size() == 2);
         check("경고에 파일 이름을 붙여 모음",
@@ -285,7 +286,7 @@ public class ServerTest {
         Path bad = Files.createTempDirectory("coolmsg-context-bad");
         Files.write(bad.resolve("users.txt"), new byte[] {(byte) 0xFF, (byte) 0xFE, '\n'});
         expectThrows("users.txt를 읽지 못하면 시작 실패 (U22)", IOException.class,
-                () -> ServerContext.load(bad, new AdminConfig(bad.resolve("admin.txt"))));
+                () -> ServerContext.load(bad, bad.resolve("data"), new AdminConfig(bad.resolve("admin.txt"))));
     }
 
     // ===================================================================
@@ -298,7 +299,7 @@ public class ServerTest {
         newDirectory(sample, "users.txt");
         Files.writeString(sample.resolve("org.txt"), "D|테스트학교\n");
 
-        ServerContext ctx = ServerContext.load(dir, new AdminConfig(dir.resolve("admin.txt")));
+        ServerContext ctx = ServerContext.load(dir, dir.resolve("data"), new AdminConfig(dir.resolve("admin.txt")));
         check("users.txt·org.txt가 없으면 예시를 복사해 시작",
                 Files.exists(dir.resolve("users.txt")) && Files.exists(dir.resolve("org.txt"))
                         && ctx.getUserDirectory().getUsers().size() == 2);
@@ -306,7 +307,7 @@ public class ServerTest {
                 ctx.getStartupWarnings().stream().filter(w -> w.contains("예시")).count() == 2);
 
         ctx.getUserDirectory().add("jung", "정다은", pw());
-        ServerContext again = ServerContext.load(dir, new AdminConfig(dir.resolve("admin.txt")));
+        ServerContext again = ServerContext.load(dir, dir.resolve("data"), new AdminConfig(dir.resolve("admin.txt")));
         check("운영 파일이 있으면 예시로 덮어쓰지 않음 (추가한 사용자 유지)",
                 again.getUserDirectory().find("jung") != null
                         && again.getStartupWarnings().stream().noneMatch(w -> w.contains("예시")));

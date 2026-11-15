@@ -23,9 +23,11 @@ public class ServerFrame extends JFrame {
         super("CoolMsg 서버 관리 - " + context.getServerConfig().getServerName());
         this.context = context;
 
-        statusPanel = new StatusPanel(context.getServerConfig(), context.getServerListener());
-        context.getEvents().setTarget(statusPanel); // 서버 사건을 이 화면으로
-        UserPanel userPanel = new UserPanel(context.getUserDirectory(), statusPanel);
+        statusPanel = new StatusPanel(context.getServerConfig(), context.getServerListener(),
+                context.getUserDirectory());
+        UserPanel userPanel = new UserPanel(context.getUserDirectory(), context.getSessionRegistry(), statusPanel);
+        context.getEvents().addTarget(statusPanel); // 서버 사건을 이 화면들로
+        context.getEvents().addTarget(userPanel);
         OrgPanel orgPanel = new OrgPanel();
 
         JTabbedPane tabs = new JTabbedPane();
@@ -43,7 +45,9 @@ public class ServerFrame extends JFrame {
                         "서버를 종료할까요?\n접속 중인 사용자의 연결이 모두 끊어집니다.",
                         "서버 종료", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
                 if (answer == JOptionPane.YES_OPTION) {
-                    ServerFrame.this.context.getServerListener().stop();
+                    ServerFrame.this.context.getServerListener().stop(); // 모든 연결에 BYE
+                    // BYE가 전달되고 연결이 다 닫힌 뒤 정상 종료 표시(.clean)를 만들 때까지 (3.8.6)
+                    ServerFrame.this.context.getServerListener().awaitStopped(5000);
                     dispose();
                     System.exit(0);
                 }

@@ -25,6 +25,8 @@ import javax.swing.text.BadLocationException;
 import coolmsg.common.ProtocolInfo;
 import coolmsg.server.ServerEventListener;
 import coolmsg.server.config.ServerConfig;
+import coolmsg.server.config.UserAccount;
+import coolmsg.server.config.UserDirectory;
 import coolmsg.server.net.ServerListener;
 
 /**
@@ -32,7 +34,7 @@ import coolmsg.server.net.ServerListener;
  *
  * 서버 사건(ServerEventListener)을 받아 화면에 보여 준다. 사건은 소켓 스레드에서 오므로
  * 화면을 고칠 때는 항상 SwingUtilities.invokeLater로 Swing 스레드에 맡긴다(동시성 규칙 C9).
- * 로그는 최근 1000줄만 유지한다(U29). 접속자 목록은 로그인을 구현하는 3단계에서 채운다.
+ * 로그는 최근 1000줄만 유지한다(U29). 접속자 목록은 로그인한 사용자를 "이름 (아이디)"로 등록 순서대로 보여 준다.
  */
 public class StatusPanel extends JPanel implements ServerEventListener {
 
@@ -41,15 +43,17 @@ public class StatusPanel extends JPanel implements ServerEventListener {
     private static final int MAX_LOG_LINES = 1000;
 
     private final ServerListener listener;
+    private final UserDirectory users;
     private final JLabel stateLabel = new JLabel();
     private final JButton startStopButton = new JButton();
     private final DefaultListModel<String> onlineUsers = new DefaultListModel<>();
     private final JTextArea logArea = new JTextArea();
     private boolean running = false;
 
-    public StatusPanel(ServerConfig config, ServerListener listener) {
+    public StatusPanel(ServerConfig config, ServerListener listener, UserDirectory users) {
         super(new BorderLayout(8, 8));
         this.listener = listener;
+        this.users = users;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         // 위쪽: 포트, 상태, 시작/중지 버튼
@@ -124,6 +128,18 @@ public class StatusPanel extends JPanel implements ServerEventListener {
         SwingUtilities.invokeLater(() -> {
             running = nowRunning;
             updateState();
+        });
+    }
+
+    @Override
+    public void onOnlineUsersChanged(java.util.List<String> onlineUserIds) {
+        SwingUtilities.invokeLater(() -> {
+            onlineUsers.clear();
+            for (UserAccount u : users.getUsers()) { // 등록 순서대로
+                if (onlineUserIds.contains(u.getId())) {
+                    onlineUsers.addElement(u.getName() + " (" + u.getId() + ")");
+                }
+            }
         });
     }
 

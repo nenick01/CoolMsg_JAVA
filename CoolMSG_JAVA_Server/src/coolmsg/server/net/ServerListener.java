@@ -18,6 +18,7 @@ import coolmsg.server.ServerEventListener;
  * - 동시 접속이 maxConnections(기본 400, U28)를 넘으면 ERROR를 보내고 바로 끊는다.
  * - 중지하면 접속 받기를 멈추고 모든 연결을 끊는다(U8). 같은 포트로 바로 다시 시작할 수 있다.
  * - 모든 네트워크 카드(0.0.0.0)에서 접속을 받는다. 같은 PC는 localhost, 다른 PC는 이 PC의 IP로 접속한다.
+ * - 저장소(StorageHooks): 시작 때 포트를 연 뒤·접속을 받기 전에 열고, 중지 때 모든 연결이 닫힌 뒤 닫는다(3.8.6).
  */
 public class ServerListener {
 
@@ -34,6 +35,9 @@ public class ServerListener {
 
     private ServerSocket serverSocket;
     private volatile boolean running;
+    private StorageHooks storage = StorageHooks.NONE;
+    /** 중지 뒤 "연결이 다 닫히길 기다렸다가 저장소 닫기"를 하는 스레드. 없으면 null. */
+    private Thread stopper;
 
     public ServerListener(int port, RequestDispatcher dispatcher, SessionRegistry registry, ServerEventListener events) {
         this(port, dispatcher, registry, events, ClientSession.DEFAULT_IDLE_TIMEOUT_MILLIS,
@@ -61,10 +65,17 @@ public class ServerListener {
         if (running) {
             return;
         }
+        awaitStopped(0); // 직전 중지의 저장소 닫기가 끝난 뒤에 연다
         ServerSocket ss = new ServerSocket();
         ss.setReuseAddress(true); // 중지 직후 같은 포트로 다시 시작할 수 있게
         try {
             ss.bind(new InetSocketAddress(port));
+        } catch (IOException e) {
+            ss.close();
+            throw e;
+        }
+        try {
+            storage.open();
         } catch (IOException e) {
             ss.close();
             throw e;
@@ -78,7 +89,12 @@ public class ServerListener {
         events.onServerStateChanged(true);
     }
 
-    /** 접속 받기를 멈추고 모든 연결을 끊는다. 실행 중이 아니면 아무것도 하지 않는다. */
+    public static final String SERVER_STOP_MESSAGE = "서버가 중지되었습니다.";
+
+    /**
+     * 접속 받기를 멈추고, 모든 연결에 BYE("서버가 중지되었습니다")를 보낸 뒤 끊는다(U8, U30).
+     * 끊기는 별도 스레드에서 진행되므로 바로 돌아온다. 실행 중이 아니면 아무것도 하지 않는다.
+     */
     public synchronized void stop() {
         if (!running) {
             return;
@@ -89,9 +105,57 @@ public class ServerListener {
         } catch (IOException ignored) {
             // 이미 닫힘
         }
-        registry.closeAll(CloseReason.SERVER_STOP);
+        registry.kickAll(SERVER_STOP_MESSAGE, CloseReason.SERVER_STOP);
         events.onLog("서버 중지");
         events.onServerStateChanged(false);
+        StorageHooks s = storage;
+        stopper = new Thread(() -> {
+            awaitAllClosed(ClientSession.KICK_FLUSH_MILLIS + 1000);
+            s.close();
+        }, "stopper");
+        stopper.setDaemon(true);
+        stopper.start();
+    }
+
+    /** 저장소를 연결·해제할 대상. 시작 전에 한 번 정한다. */
+    public synchronized void setStorageHooks(StorageHooks hooks) {
+        this.storage = (hooks == null) ? StorageHooks.NONE : hooks;
+    }
+
+    /**
+     * 중지 뒤 저장소 닫기(정상 종료 표시)가 끝나기를 기다린다. 프로그램을 끝내기 직전에 부른다.
+     *
+     * @param millis 최대 대기 시간. 0이면 끝날 때까지
+     */
+    public void awaitStopped(long millis) {
+        Thread t;
+        synchronized (this) {
+            t = stopper;
+        }
+        if (t == null) {
+            return;
+        }
+        try {
+            t.join(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * 모든 연결이 닫히기를 최대 millis만큼 기다린다.
+     * 프로그램을 끝내기 직전에 불러, BYE가 실제로 전달될 시간을 준다.
+     */
+    public void awaitAllClosed(long millis) {
+        long deadline = System.currentTimeMillis() + millis;
+        while (registry.size() > 0 && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     public boolean isRunning() {

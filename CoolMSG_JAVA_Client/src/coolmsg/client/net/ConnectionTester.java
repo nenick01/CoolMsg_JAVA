@@ -107,6 +107,22 @@ public class ConnectionTester {
         this.timeoutMillis = timeoutMillis;
     }
 
+    /**
+     * 연결할 때 생긴 예외를 화면용 문장으로 바꾼다 (로그인 화면에서도 연결 테스트와 같은 안내를 쓰기 위해).
+     */
+    public static String describe(IOException e) {
+        if (e instanceof UnknownHostException) {
+            return Outcome.UNKNOWN_HOST.getDescription();
+        }
+        if (e instanceof ConnectException) {
+            return Outcome.REFUSED.getDescription();
+        }
+        if (e instanceof SocketTimeoutException) {
+            return Outcome.TIMEOUT.getDescription();
+        }
+        return e.getMessage() == null ? Outcome.IO_ERROR.getDescription() : e.getMessage();
+    }
+
     /** 연결 테스트를 한다. 예외를 던지지 않고 결과로 돌려준다. */
     public Result test(ServerAddress address) {
         try (Socket socket = new Socket()) {

@@ -20,6 +20,7 @@ import coolmsg.common.file.HeaderFormat;
 import coolmsg.common.file.TimeFormat;
 import coolmsg.common.model.AttachmentInfo;
 import coolmsg.common.model.DeliveryState;
+import coolmsg.common.model.HtmlText;
 import coolmsg.common.model.MessageData;
 import coolmsg.common.net.Packet;
 import coolmsg.common.net.PacketReader;
@@ -50,6 +51,7 @@ public class CommonTest {
         atomicFile();
         timeFormat();
         model();
+        htmlText();
 
         System.out.println();
         System.out.println("결과: 통과 " + passed + " / 실패 " + failed);
@@ -356,6 +358,25 @@ public class CommonTest {
         ByteArrayOutputStream bout = new ByteArrayOutputStream();
         new DataOutputStream(bout).writeInt(length);
         return bout.toByteArray();
+    }
+
+    // ===================================================================
+    // HtmlText (설계서 5장 U37)
+    // ===================================================================
+
+    private static void htmlText() {
+        section("HtmlText - 본문 HTML 변환 U37");
+        check("특수 문자 바꾸기", HtmlText.fromPlain("a<b>&\"c").equals("a&lt;b&gt;&amp;&quot;c"));
+        check("줄바꿈 → <br> (CRLF도 한 번만)", HtmlText.fromPlain("1\r\n2\n3").equals("1<br>\n2<br>\n3"));
+        String plain = "<script> & 줄1\n줄2";
+        check("일반 텍스트 → HTML → 글자: 원래대로", HtmlText.toPlain(HtmlText.fromPlain(plain)).equals(plain));
+        check("&amp;lt; 는 글자 '&lt;' 로 (두 번 풀지 않음)", HtmlText.toPlain("&amp;lt;").equals("&lt;"));
+        check("태그 제거", HtmlText.toPlain("<b>굵게</b> <font color=\"red\">빨강</font>").equals("굵게 빨강"));
+        check("빈 본문: 태그·공백·&nbsp;뿐", HtmlText.isBlank("<p> </p><br>&nbsp;\n") && HtmlText.isBlank(""));
+        check("글자가 있으면 빈 본문 아님", !HtmlText.isBlank("<p>.</p>"));
+        check("미리보기: 줄바꿈은 공백, 길면 …",
+                HtmlText.preview(HtmlText.fromPlain("가나다\n라마바사"), 5).equals("가나다 라…")
+                        && HtmlText.preview("짧음", 30).equals("짧음"));
     }
 
     private static void section(String name) {
