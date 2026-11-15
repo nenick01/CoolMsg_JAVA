@@ -90,6 +90,9 @@ final class NetTest {
 
         section.accept("구현 5단계 - 접속 상태(PRESENCE)·읽음 알림(RECEIPT) 실제 소켓 (2.5, 2.6)");
         presenceAndReceipts();
+
+        section.accept("구현 6단계 - ORG 요청 실제 소켓 (2.10)");
+        orgOverSocket();
     }
 
     // ===================================================================
@@ -259,6 +262,28 @@ final class NetTest {
                             kim.readOrNull(300) == null && server.registry.isOnline("lee") && lee2 != null);
                 }
             }
+        } finally {
+            server.stop();
+        }
+    }
+
+    private static void orgOverSocket() throws Exception {
+        TestServer server = TestServer.start(60_000, SendQueue.DEFAULT_CAPACITY, 10);
+        try (Client kim = loggedIn(server, "kim")) {
+            kim.send(new Packet(PacketType.ORG).setReqId(5));
+            Packet none = kim.read();
+            check.accept("조직도가 연결되지 않음 → ORG_NONE(이유)", none.getType() == PacketType.ORG_NONE
+                    && none.getReqId() == 5 && none.get(HeaderKeys.REASON) != null);
+
+            Path file = TestServer.newTempDir("coolmsg-net-org").resolve("org.txt");
+            Files.writeString(file, "D|학교\nU|학교|kim\nU|학교|park\n");
+            coolmsg.server.config.OrgChart chart = new coolmsg.server.config.OrgChart(file);
+            chart.load(id -> true);
+            server.dispatcher.setOrgChart(chart, id -> !id.equals("park")); // park은 삭제된 사용자
+            kim.send(new Packet(PacketType.ORG).setReqId(6));
+            Packet ok = kim.read();
+            check.accept("ORG_OK: org.txt 형식, 삭제된 사용자는 걸러서 보냄 (U55)",
+                    ok.getType() == PacketType.ORG_OK && ok.getReqId() == 6 && ok.getText().equals("D|학교\nU|학교|kim\n"));
         } finally {
             server.stop();
         }
@@ -548,6 +573,7 @@ final class NetTest {
 
         final Path dataDir;
         final MessageService messages;
+        final RequestDispatcher dispatcher;
 
         private TestServer(int port, int idleMillis, int queueCapacity, int maxConnections) {
             this(port, idleMillis, queueCapacity, maxConnections, newTempDir("coolmsg-net-data"));
@@ -560,7 +586,7 @@ final class NetTest {
             MessageStore store = new MessageStore(dataDir.resolve("messages"));
             PendingIndex index = new PendingIndex(dataDir.resolve("pending"));
             messages = new MessageService(store, index, new ReceiptQueue(dataDir.resolve("receipts")), users, registry, this);
-            RequestDispatcher dispatcher = new RequestDispatcher(new LoginService(ServerConfig.defaults(), users),
+            dispatcher = new RequestDispatcher(new LoginService(ServerConfig.defaults(), users),
                     messages, registry, this);
             listener = new ServerListener(port, dispatcher, registry, this, idleMillis, queueCapacity, maxConnections);
             listener.setStorageHooks(new StorageHooks() {

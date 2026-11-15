@@ -18,6 +18,7 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
 import coolmsg.server.ServerEventListener;
+import coolmsg.server.config.OrgChart;
 import coolmsg.server.config.UserAccount;
 import coolmsg.server.config.UserDirectory;
 import coolmsg.server.config.UserDirectoryException;
@@ -38,11 +39,12 @@ import coolmsg.server.net.SessionRegistry;
 public class UserPanel extends JPanel implements ServerEventListener {
 
     private static final long serialVersionUID = 1L;
-    private static final String[] COLUMNS = {"순서", "아이디", "이름", "비밀번호", "상태"};
+    private static final String[] COLUMNS = {"순서", "아이디", "이름", "소속 부서", "비밀번호", "상태"};
     private static final int COL_ID = 1;
     public static final String USER_DELETED_MESSAGE = "관리자가 계정을 삭제하여 연결이 끊겼습니다.";
 
     private final UserDirectory directory;
+    private final OrgChart orgChart;
     private final SessionRegistry sessions;
     private final StatusPanel status;
     private final DefaultTableModel model = new DefaultTableModel(COLUMNS, 0) {
@@ -62,8 +64,9 @@ public class UserPanel extends JPanel implements ServerEventListener {
     private final JButton restoreButton = new JButton("복구");
     private final JButton refreshButton = new JButton("새로고침");
 
-    public UserPanel(UserDirectory directory, SessionRegistry sessions, StatusPanel status) {
+    public UserPanel(UserDirectory directory, OrgChart orgChart, SessionRegistry sessions, StatusPanel status) {
         super(new BorderLayout(8, 8));
+        this.orgChart = orgChart;
         this.directory = directory;
         this.sessions = sessions;
         this.status = status;
@@ -105,7 +108,9 @@ public class UserPanel extends JPanel implements ServerEventListener {
         for (UserAccount u : users) {
             // 비밀번호는 해시만 있으므로 원문을 보여 줄 수 없다. 설정 여부만 표시한다.
             String state = u.isDeleted() ? "삭제됨" : (sessions.isOnline(u.getId()) ? "접속 중" : "");
-            model.addRow(new Object[] {order, u.getId(), u.getName(), "●●●● (설정됨)", state});
+            String dept = u.isDeleted() ? "" : orgChart.deptNameOf(u.getId());
+            model.addRow(new Object[] {order, u.getId(), u.getName(), dept == null ? "(미배치)" : dept,
+                    "●●●● (설정됨)", state});
             if (u.getId().equals(selectId)) {
                 selectRow = order - 1;
             }
@@ -115,6 +120,12 @@ public class UserPanel extends JPanel implements ServerEventListener {
             table.setRowSelectionInterval(selectRow, selectRow);
         }
         updateButtons();
+    }
+
+    /** 표를 다시 그린다 (다른 탭에서 조직도를 바꾼 뒤 소속 부서 열 갱신). 고른 줄은 유지. */
+    public void refreshTable() {
+        UserAccount u = selected();
+        refresh(u == null ? null : u.getId());
     }
 
     /** 선택한 줄의 사용자. 선택이 없으면 null. */
@@ -217,6 +228,12 @@ public class UserPanel extends JPanel implements ServerEventListener {
         try {
             directory.delete(u.getId());
             sessions.kick(u.getId(), USER_DELETED_MESSAGE, CloseReason.USER_DELETED); // 접속 중이면 끊기 (C7: 삭제 표시 먼저)
+            try {
+                orgChart.removeUser(u.getId()); // 조직도에서도 빼서 저장 (U55)
+            } catch (IOException e) {
+                status.log("경고: 조직도에서 " + u.getId() + "를 빼서 저장하지 못했습니다 (조직도를 보낼 때는 걸러짐): "
+                        + e.getMessage());
+            }
             status.log("사용자 삭제: " + u.getId());
             refresh(u.getId());
         } catch (UserDirectoryException e) {

@@ -3,7 +3,6 @@ package coolmsg.client.ui;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.event.ComponentAdapter;
@@ -17,7 +16,6 @@ import java.util.concurrent.ExecutionException;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -31,6 +29,7 @@ import javax.swing.SwingWorker;
 
 import coolmsg.client.ClientController;
 import coolmsg.client.model.UserEntry;
+import coolmsg.common.model.OrgTree;
 
 /**
  * 메시지 작성 창 (설계서 4.3, 5장 U40). 구현 4단계: 받는 사람, 본문(일반 텍스트), [보내기].
@@ -180,32 +179,34 @@ public class ComposeFrame extends JFrame {
         }
     }
 
-    /** 체크 목록 창으로 받는 사람을 더하거나 뺀다. */
+    /**
+     * [받는 사람 선택]: 메인 창과 같은 체크박스 조직도 창 (U57). 지금 받는 사람은 체크된 상태로 열린다.
+     * 조직도를 못 받았으면 등록 순서 목록(임시 표시). [확인]하면 체크된 사람이 받는 사람이 된다.
+     */
     private void pickReceivers() {
         JDialog dialog = new JDialog(this, "받는 사람 선택", true);
-        JPanel list = new JPanel(new GridLayout(0, 1));
-        List<JCheckBox> boxes = new ArrayList<>();
         List<UserEntry> users = controller.users();
-        for (UserEntry u : users) {
-            JCheckBox box = new JCheckBox(u.getName() + " (" + u.getId() + ")", receivers.contains(u.getId()));
-            boxes.add(box);
-            list.add(box);
+        OrgCheckTree tree = new OrgCheckTree();
+        OrgTree org = controller.orgTree();
+        if (org != null) {
+            tree.showOrg(org, users);
+        } else {
+            tree.showFlat(users);
         }
+        tree.setChecked(receivers);
+        JScrollPane scroll = new JScrollPane(tree);
+        scroll.setBorder(BorderFactory.createTitledBorder(org != null ? "조직도" : "조직도 (임시 표시)"));
         JButton ok = new JButton("확인");
         JButton cancel = new JButton("취소");
         ok.addActionListener(e -> {
+            List<String> checked = tree.checkedIds();
             Set<String> chosen = new LinkedHashSet<>();
-            for (String id : receivers) { // 이미 고른 순서를 유지하고
-                int i = indexOf(users, id);
-                if (i >= 0 && boxes.get(i).isSelected()) {
+            for (String id : receivers) { // 이미 고른 순서를 유지하고 (목록에 없는 아이디는 그대로 둔다)
+                if (checked.contains(id) || indexOf(users, id) < 0) {
                     chosen.add(id);
                 }
             }
-            for (int i = 0; i < users.size(); i++) { // 새로 고른 사람은 뒤에
-                if (boxes.get(i).isSelected()) {
-                    chosen.add(users.get(i).getId());
-                }
-            }
+            chosen.addAll(checked); // 새로 고른 사람은 조직도 순서로 뒤에
             receivers.clear();
             receivers.addAll(chosen);
             updateChips();
@@ -216,10 +217,13 @@ public class ComposeFrame extends JFrame {
         buttons.add(ok);
         buttons.add(cancel);
 
+        JLabel hint = new JLabel("부서를 체크하면 그 부서 사람이 모두 선택됩니다.");
+        hint.setBorder(BorderFactory.createEmptyBorder(6, 8, 2, 8));
         dialog.setLayout(new BorderLayout());
-        dialog.add(new JScrollPane(list), BorderLayout.CENTER);
+        dialog.add(hint, BorderLayout.NORTH);
+        dialog.add(scroll, BorderLayout.CENTER);
         dialog.add(buttons, BorderLayout.SOUTH);
-        dialog.setSize(280, 360);
+        dialog.setSize(320, 460);
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
     }

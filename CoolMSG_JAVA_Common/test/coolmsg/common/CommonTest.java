@@ -21,6 +21,7 @@ import coolmsg.common.file.TimeFormat;
 import coolmsg.common.model.AttachmentInfo;
 import coolmsg.common.model.DeliveryState;
 import coolmsg.common.model.HtmlText;
+import coolmsg.common.model.OrgTree;
 import coolmsg.common.model.MessageData;
 import coolmsg.common.net.Packet;
 import coolmsg.common.net.PacketReader;
@@ -52,6 +53,7 @@ public class CommonTest {
         timeFormat();
         model();
         htmlText();
+        orgTree();
 
         System.out.println();
         System.out.println("결과: 통과 " + passed + " / 실패 " + failed);
@@ -377,6 +379,51 @@ public class CommonTest {
         check("미리보기: 줄바꿈은 공백, 길면 …",
                 HtmlText.preview(HtmlText.fromPlain("가나다\n라마바사"), 5).equals("가나다 라…")
                         && HtmlText.preview("짧음", 30).equals("짧음"));
+    }
+
+    // ===================================================================
+    // OrgTree (설계서 3.2, 5장 U54)
+    // ===================================================================
+
+    private static void orgTree() {
+        section("OrgTree - org.txt 형식 (3.2, U54)");
+        String text = "# 주석\n"
+                + "D|학교\n"
+                + "D|학교>교무실\n"
+                + "U|학교>교무실|kim\n"
+                + "U|학교|boss\n"
+                + "D|학교>교무실>1학년\n"
+                + "U|학교>교무실>1학년|lee\r\n"
+                + "D|다른학교\n"
+                + "U|학교>없는부서|park\n"
+                + "U|학교|kim\n"
+                + "D|학교>나쁜|이름\n"
+                + "D|학교>교무실\n"
+                + "이상한 줄\n";
+        List<String> warnings = new java.util.ArrayList<>();
+        OrgTree t = OrgTree.parse(List.of(text.split("\n")), warnings);
+        check("맨 위 부서 하나, 적힌 순서 유지(부서·사람 섞임)",
+                t.getRoot().getName().equals("학교") && t.getRoot().getChildren().size() == 2
+                        && t.getRoot().getChildren().get(0).getName().equals("교무실")
+                        && t.getRoot().getChildren().get(1).getName().equals("boss"));
+        check("하위 부서와 \\r\\n 줄 끝", t.deptNameOf("lee").equals("1학년"));
+        check("잘못된 줄 6개는 건너뛰고 경고 (두 번째 맨 위, 없는 부서, 두 번 나온 사람, 이름에 |, 중복 부서, 형식)",
+                warnings.size() == 6);
+        check("처음 나온 부서만 씀", t.deptNameOf("kim").equals("교무실"));
+        String out = t.toText();
+        check("다시 쓰면 같은 구조 (읽기 → 쓰기 → 읽기)",
+                OrgTree.parse(List.of(out.split("\n")), new java.util.ArrayList<>()).toText().equals(out)
+                        && out.startsWith("D|학교\nD|학교>교무실\nU|학교>교무실|kim\nD|학교>교무실>1학년\n"));
+        OrgTree copy = t.copy();
+        check("사용자 빼기 (U55): 뺀 아이디 목록, 원본은 그대로",
+                copy.retainUsers(id -> !id.equals("kim")).equals(List.of("kim")) && copy.deptNameOf("kim") == null
+                        && t.deptNameOf("kim") != null);
+        check("트리 순서의 사용자 목록", t.userIds().equals(List.of("kim", "lee", "boss")));
+        check("부서 이름 규칙 (U54)", OrgTree.checkDeptName("교무실") == null && OrgTree.checkDeptName(" ") != null
+                && OrgTree.checkDeptName("a".repeat(21)) != null && OrgTree.checkDeptName("a>b") != null
+                && OrgTree.checkDeptName("a|b") != null);
+        check("부서가 없으면 맨 위 없음", OrgTree.parse(List.of("# 비어 있음", "U|학교|kim"), new java.util.ArrayList<>())
+                .getRoot() == null);
     }
 
     private static void section(String name) {

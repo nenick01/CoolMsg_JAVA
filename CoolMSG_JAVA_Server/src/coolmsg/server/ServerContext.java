@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import coolmsg.server.config.AdminConfig;
+import coolmsg.server.config.OrgChart;
 import coolmsg.server.config.ServerConfig;
 import coolmsg.server.config.UserDirectory;
 import coolmsg.server.net.RequestDispatcher;
@@ -38,6 +39,7 @@ public class ServerContext {
     private final AdminConfig adminConfig;
     private final ServerConfig serverConfig;
     private final UserDirectory userDirectory;
+    private final OrgChart orgChart;
     private final ServerEvents events = new ServerEvents();
     private final SessionRegistry sessionRegistry = new SessionRegistry(events);
     private final LoginService loginService;
@@ -49,7 +51,8 @@ public class ServerContext {
     private final List<String> startupWarnings = new ArrayList<>();
 
     private ServerContext(Path configDir, Path dataDir, AdminConfig adminConfig, ServerConfig serverConfig,
-            UserDirectory userDirectory) {
+            UserDirectory userDirectory, OrgChart orgChart) {
+        this.orgChart = orgChart;
         this.configDir = configDir;
         this.dataDir = dataDir;
         this.adminConfig = adminConfig;
@@ -61,6 +64,10 @@ public class ServerContext {
         this.messageService = new MessageService(messageStore, pendingIndex,
                 new ReceiptQueue(dataDir.resolve("receipts")), userDirectory, sessionRegistry, events);
         this.dispatcher = new RequestDispatcher(loginService, messageService, sessionRegistry, events);
+        this.dispatcher.setOrgChart(orgChart, id -> {
+            var u = userDirectory.find(id);
+            return u != null && !u.isDeleted();
+        });
         this.serverListener = new ServerListener(serverConfig.getPort(), dispatcher, sessionRegistry, events);
         this.serverListener.setStorageHooks(new StorageHooks() {
             @Override
@@ -89,14 +96,22 @@ public class ServerContext {
         ServerConfig serverConfig = ServerConfig.load(configDir.resolve("server.txt"));
         UserDirectory userDirectory = new UserDirectory(configDir.resolve("users.txt"));
         userDirectory.load();
+        OrgChart orgChart = new OrgChart(configDir.resolve("org.txt"));
+        orgChart.load(id -> {
+            var u = userDirectory.find(id);
+            return u != null && !u.isDeleted();
+        });
 
-        ServerContext context = new ServerContext(configDir, dataDir, adminConfig, serverConfig, userDirectory);
+        ServerContext context = new ServerContext(configDir, dataDir, adminConfig, serverConfig, userDirectory, orgChart);
         context.startupWarnings.addAll(copied);
         for (String w : serverConfig.getWarnings()) {
             context.startupWarnings.add("[server.txt] " + w);
         }
         for (String w : userDirectory.getWarnings()) {
             context.startupWarnings.add("[users.txt] " + w);
+        }
+        for (String w : orgChart.getWarnings()) {
+            context.startupWarnings.add("[org.txt] " + w);
         }
         return context;
     }
@@ -133,6 +148,10 @@ public class ServerContext {
 
     public UserDirectory getUserDirectory() {
         return userDirectory;
+    }
+
+    public OrgChart getOrgChart() {
+        return orgChart;
     }
 
     /** 서버 사건 중계기. 화면은 getEvents().addTarget(화면)으로 연결한다. */

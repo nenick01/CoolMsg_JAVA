@@ -59,6 +59,9 @@ final class MessageClientTest {
 
         section.accept("구현 5단계 - 보낸 내역 상태(앞으로만)·읽음 요약·READ 다시 보내기 (2.6, U4, U49)");
         receiptsAndReads();
+
+        section.accept("구현 6단계 - 체크박스 조직도·ORG 요청 (2.10, U53)");
+        orgCheckTree();
     }
 
     // ===================================================================
@@ -260,6 +263,72 @@ final class MessageClientTest {
             check.accept("로그인 성공 직후 못 알린 READ를 다시 보냄 (U49)",
                     seen.equals(List.of("READ:" + pending.getMessageId())));
             check.accept("다시 보낸 뒤에는 알렸다고 기록", new Mailbox(base.resolve("lee")).unreportedReads().isEmpty());
+        }
+    }
+
+    private static void orgCheckTree() throws Exception {
+        List<coolmsg.client.model.UserEntry> users = List.of(
+                new coolmsg.client.model.UserEntry("kim", "김철수", true),
+                new coolmsg.client.model.UserEntry("lee", "이영희", false),
+                new coolmsg.client.model.UserEntry("park", "박민수", false),
+                new coolmsg.client.model.UserEntry("choi", "최지우", true));
+        coolmsg.common.model.OrgTree org = coolmsg.common.model.OrgTree.parse(List.of(
+                "D|학교", "D|학교>교무실", "U|학교>교무실|kim", "D|학교>교무실>1학년", "U|학교>교무실>1학년|lee",
+                "D|학교>행정실", "U|학교>행정실|park", "U|학교>행정실|newbie"), new ArrayList<>());
+        coolmsg.client.ui.OrgCheckTree tree = new coolmsg.client.ui.OrgCheckTree();
+        tree.showOrg(org, users);
+        check.accept("조직도에 없는 사람(choi)은 '미배치'에, 목록에 없는 아이디(newbie)는 건너뜀 (U50)",
+                "NONE".equals(tree.deptState("미배치")) && !tree.toggle("newbie"));
+        tree.toggle("교무실");
+        check.accept("부서 체크 → 하위 부서 포함 모두 (나도 포함)", tree.checkedIds().equals(List.of("kim", "lee"))
+                && "ALL".equals(tree.deptState("1학년")));
+        tree.toggle("lee");
+        check.accept("한 명 풀면 상위 부서는 '일부', 하위 부서는 '없음'",
+                "SOME".equals(tree.deptState("교무실")) && "NONE".equals(tree.deptState("1학년"))
+                        && "SOME".equals(tree.deptState("학교")));
+        tree.toggle("교무실");
+        check.accept("'일부'인 부서를 누르면 모두 체크", "ALL".equals(tree.deptState("교무실")));
+        tree.toggle("교무실");
+        check.accept("'모두'인 부서를 누르면 모두 풀림", tree.checkedIds().isEmpty());
+        tree.toggle("학교");
+        tree.toggle("미배치");
+        check.accept("트리 순서, 중복 없이", tree.checkedIds().equals(List.of("kim", "lee", "park", "choi")));
+        tree.clearChecks();
+        check.accept("[메시지 쓰기] 뒤 체크 모두 풀기", tree.checkedIds().isEmpty());
+        coolmsg.client.ui.OrgCheckTree flat = new coolmsg.client.ui.OrgCheckTree();
+        flat.showFlat(users);
+        flat.toggle("park");
+        check.accept("임시 표시도 체크박스 목록", flat.checkedIds().equals(List.of("park")) && flat.deptState("미배치") == null);
+
+        // 작성 창 [받는 사람 선택]: 지금 받는 사람을 체크한 채로 연다 (U57)
+        coolmsg.client.ui.OrgCheckTree picker = new coolmsg.client.ui.OrgCheckTree();
+        picker.showOrg(org, users);
+        picker.setChecked(java.util.Set.of("lee", "choi"));
+        check.accept("[받는 사람 선택]: 이미 받는 사람은 체크된 채로, 그 부서는 모두/일부로 (U57)",
+                picker.checkedIds().equals(List.of("lee", "choi")) && "ALL".equals(picker.deptState("1학년"))
+                        && "SOME".equals(picker.deptState("교무실")) && "ALL".equals(picker.deptState("미배치"))
+                        && "NONE".equals(picker.deptState("행정실")));
+        picker.toggle("행정실");
+        picker.setChecked(java.util.Set.of("kim"));
+        check.accept("다시 열 때는 그때의 받는 사람만 체크 (이전 체크는 풀림)", picker.checkedIds().equals(List.of("kim")));
+
+        // ORG 요청 (가짜 서버)
+        try (FakeServer server = new FakeServer((in, out) -> {
+            Packet r1 = in.read();
+            out.write(Packet.replyTo(r1, PacketType.ORG_OK).setText("D|학교\nU|학교|kim\n"));
+            Packet r2 = in.read();
+            out.write(Packet.replyTo(r2, PacketType.ORG_NONE).put(HeaderKeys.REASON, "조직도 설정이 없습니다."));
+            Packet r3 = in.read();
+            out.write(Packet.replyTo(r3, PacketType.ORG_OK).setText("U|학교|kim\n"));
+            in.read();
+        })) {
+            Connection c = Connection.open(server.address(), new NoopListener());
+            ServerApi api = new ServerApi(c);
+            coolmsg.common.model.OrgTree got = api.org();
+            check.accept("ORG_OK → 조직도", got != null && "학교".equals(got.getRoot().getName()));
+            check.accept("ORG_NONE → null (임시 표시)", api.org() == null);
+            check.accept("형식 오류(맨 위 부서 없음) → null (임시 표시)", api.org() == null);
+            c.close();
         }
     }
 

@@ -40,6 +40,7 @@ public class ServerTest {
         sampleCopy();
         NetTest.run(ServerTest::check, ServerTest::section);
         MessageTest.run(ServerTest::check, ServerTest::section);
+        OrgTest.run(ServerTest::check, ServerTest::section);
 
         System.out.println();
         System.out.println("결과: 통과 " + passed + " / 실패 " + failed);
@@ -277,11 +278,13 @@ public class ServerTest {
         newDirectory(dir, "users.txt");
         Files.writeString(dir.resolve("server.txt"), "port=9200\nport=abc\n");
         ServerContext ctx = ServerContext.load(dir, dir.resolve("data"), new AdminConfig(dir.resolve("admin.txt")));
+        check("조직도도 함께 만듦 (파일 없으면 조직도 없음)", ctx.getOrgChart() != null && !ctx.getOrgChart().exists());
         check("설정·사용자 목록을 하나씩 만들어 들고 있음",
                 ctx.getServerConfig().getPort() == 9000 && ctx.getUserDirectory().getUsers().size() == 2);
         check("경고에 파일 이름을 붙여 모음",
-                ctx.getStartupWarnings().stream().allMatch(w -> w.startsWith("[server.txt]") || w.startsWith("[users.txt]"))
-                        && ctx.getStartupWarnings().size() == 2);
+                ctx.getStartupWarnings().stream().allMatch(w -> w.startsWith("[server.txt]") || w.startsWith("[users.txt]")
+                        || w.startsWith("[org.txt]"))
+                        && ctx.getStartupWarnings().size() == 3); // org.txt 없음 경고 (6단계)
 
         Path bad = Files.createTempDirectory("coolmsg-context-bad");
         Files.write(bad.resolve("users.txt"), new byte[] {(byte) 0xFF, (byte) 0xFE, '\n'});

@@ -30,6 +30,7 @@ import coolmsg.common.ProtocolInfo;
 import coolmsg.common.model.DeliveryState;
 import coolmsg.common.model.HtmlText;
 import coolmsg.common.model.MessageData;
+import coolmsg.common.model.OrgTree;
 import coolmsg.common.net.HeaderKeys;
 import coolmsg.common.net.Packet;
 import coolmsg.common.net.PacketType;
@@ -65,6 +66,8 @@ public class ClientController implements Connection.Listener {
     private volatile Mailbox mailbox;
     private volatile String myId;
     private volatile List<UserEntry> users = List.of();
+    /** 로그인 뒤 받은 조직도. 못 받았으면 null(임시 표시). 작성 창의 [받는 사람 선택]도 이것을 쓴다(U57). */
+    private volatile OrgTree orgTree;
 
     // 새 메시지 알림 묶기 (Swing 스레드에서만)
     private final List<MessageData> unnotified = new ArrayList<>();
@@ -163,9 +166,34 @@ public class ClientController implements Connection.Listener {
         mainFrame = new MainFrame(this, outcome.userId, outcome.users);
         mainFrame.setUnreadCount(mailbox.unreadCount());
         mainFrame.setVisible(true);
+        loadOrgChart();
         if (!unnotified.isEmpty()) {
             notifyTimer.restart(); // 메인 창보다 먼저 도착한 밀린 메시지 알림
         }
+    }
+
+    /** 조직도를 받아 메인 창을 부서 트리로 바꾼다. 응답은 다른 스레드에서 최대 3초 기다린다 (2.10). */
+    private void loadOrgChart() {
+        ServerApi a = api;
+        if (a == null) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            OrgTree org = a.org();
+            SwingUtilities.invokeLater(() -> {
+                if (mainFrame == null || api != a) {
+                    return; // 그사이 로그아웃·끊김
+                }
+                orgTree = org;
+                if (org != null) {
+                    mainFrame.showOrg(org, users); // 지금까지 반영된 접속 상태로
+                } else {
+                    mainFrame.showTemporary(users);
+                }
+            });
+        }, "org");
+        t.setDaemon(true);
+        t.start();
     }
 
     // =====================================================================
@@ -533,6 +561,12 @@ public class ClientController implements Connection.Listener {
         return mailbox;
     }
 
+    /** 로그인 뒤 받은 조직도 (복사본). 못 받았으면 null. */
+    public OrgTree orgTree() {
+        OrgTree t = orgTree;
+        return t == null ? null : t.copy();
+    }
+
     /** 로그인 때 받은 사용자 목록 (등록 순서, 삭제된 사용자 없음). */
     public List<UserEntry> users() {
         return users;
@@ -606,6 +640,7 @@ public class ClientController implements Connection.Listener {
         api = null;
         mailbox = null;
         users = List.of();
+        orgTree = null;
         if (h != null) {
             h.stop();
         }

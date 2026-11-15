@@ -12,6 +12,7 @@ import coolmsg.common.FormatException;
 import coolmsg.common.ProtocolInfo;
 import coolmsg.common.file.TimeFormat;
 import coolmsg.common.model.MessageData;
+import coolmsg.common.model.OrgTree;
 import coolmsg.common.net.HeaderKeys;
 import coolmsg.common.net.Packet;
 import coolmsg.common.net.PacketType;
@@ -160,6 +161,34 @@ public class ServerApi {
      */
     public Packet status(String messageId) throws IOException {
         return await(connection.request(new Packet(PacketType.STATUS).put(HeaderKeys.MESSAGE_ID, messageId)));
+    }
+
+    /**
+     * 조직도 요청 (설계서 2.10). 응답은 3초까지만 기다린다(ORG_RESPONSE_TIMEOUT_MILLIS).
+     *
+     * @return 조직도. 받지 못하면(ORG_NONE, 3초 초과, 형식 오류, 연결 끊김) null → 임시 표시
+     */
+    public OrgTree org() {
+        java.util.concurrent.CompletableFuture<Packet> future = connection.request(new Packet(PacketType.ORG));
+        Packet reply;
+        try {
+            reply = future.get(ProtocolInfo.ORG_RESPONSE_TIMEOUT_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (ExecutionException | TimeoutException e) {
+            System.err.println("조직도를 받지 못했습니다: " + e);
+            return null;
+        }
+        if (reply.getType() != PacketType.ORG_OK) {
+            return null;
+        }
+        List<String> warnings = new ArrayList<>();
+        OrgTree tree = OrgTree.parse(List.of(reply.getText().split("\n")), warnings);
+        for (String w : warnings) {
+            System.err.println("[조직도] " + w);
+        }
+        return tree.getRoot() == null ? null : tree; // 맨 위 부서가 없으면 형식 오류로 보고 임시 표시
     }
 
     /** 로그아웃을 알린다 (응답 없음). */

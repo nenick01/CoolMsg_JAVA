@@ -25,12 +25,32 @@ public class ServerFrame extends JFrame {
 
         statusPanel = new StatusPanel(context.getServerConfig(), context.getServerListener(),
                 context.getUserDirectory());
-        UserPanel userPanel = new UserPanel(context.getUserDirectory(), context.getSessionRegistry(), statusPanel);
+        UserPanel userPanel = new UserPanel(context.getUserDirectory(), context.getOrgChart(),
+                context.getSessionRegistry(), statusPanel);
         context.getEvents().addTarget(statusPanel); // 서버 사건을 이 화면들로
         context.getEvents().addTarget(userPanel);
-        OrgPanel orgPanel = new OrgPanel();
+        OrgPanel orgPanel = new OrgPanel(context.getOrgChart(), context.getUserDirectory(), statusPanel,
+                context.getServerConfig().getServerName());
 
-        JTabbedPane tabs = new JTabbedPane();
+        // 조직도 탭을 떠날 때 저장 안 한 편집이 있으면 확인하고(U56), 탭에 들어올 때 최신 상태로 다시 그린다
+        JTabbedPane tabs = new JTabbedPane() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public void setSelectedIndex(int index) {
+                int current = getSelectedIndex();
+                if (current >= 0 && index != current && getComponentAt(current) == orgPanel
+                        && !orgPanel.confirmLeave()) {
+                    return; // 취소: 조직도 탭에 머문다
+                }
+                super.setSelectedIndex(index);
+                if (index >= 0 && getComponentAt(index) == orgPanel) {
+                    orgPanel.onEnter();
+                } else if (index >= 0 && getComponentAt(index) == userPanel) {
+                    userPanel.refreshTable(); // 소속 부서 열 갱신
+                }
+            }
+        };
         tabs.addTab("서버 상태", statusPanel);
         tabs.addTab("사용자 관리", userPanel);
         tabs.addTab("조직도 관리", orgPanel);
@@ -41,6 +61,9 @@ public class ServerFrame extends JFrame {
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
+                if (orgPanel.isDirty() && !orgPanel.confirmLeave()) {
+                    return; // 조직도 저장 여부를 먼저 정한다 (U56)
+                }
                 int answer = JOptionPane.showConfirmDialog(ServerFrame.this,
                         "서버를 종료할까요?\n접속 중인 사용자의 연결이 모두 끊어집니다.",
                         "서버 종료", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);

@@ -3,7 +3,10 @@ package coolmsg.server.net;
 import coolmsg.common.net.HeaderKeys;
 import coolmsg.common.net.Packet;
 import coolmsg.common.net.PacketType;
+import java.util.function.Predicate;
+
 import coolmsg.server.ServerEventListener;
+import coolmsg.server.config.OrgChart;
 import coolmsg.server.service.LoginService;
 import coolmsg.server.service.MessageService;
 
@@ -15,7 +18,7 @@ import coolmsg.server.service.MessageService;
  * - 로그인 전에 PING·LOGIN 외의 요청: ERROR "로그인이 필요합니다" (설계서 2.3)
  * - 첨부파일(UPLOAD·DOWNLOAD)과 아직 만들지 않은 명령: ERROR "지원하지 않는 기능"
  *
- * 구현 5단계까지: PING, LOGIN(+ 밀린 메시지·알림), LOGOUT, SEND, ACK, READ, STATUS.
+ * 구현 6단계까지: PING, LOGIN(+ 밀린 메시지·알림), LOGOUT, SEND, ACK, READ, STATUS, ORG.
  *
  * 응답 순서가 중요한 요청(LOGIN, SEND)은 여기서 응답을 직접 대기열에 넣고 null을 돌려준다.
  *   LOGIN: LOGIN_OK → 밀린 MSG (3.8.5 ②)
@@ -29,6 +32,8 @@ public class RequestDispatcher {
     private final MessageService messageService;
     private final SessionRegistry registry;
     private final ServerEventListener events;
+    private OrgChart orgChart; // 없으면 ORG에 ORG_NONE
+    private Predicate<String> activeUser = id -> true;
 
     public RequestDispatcher(LoginService loginService, MessageService messageService, SessionRegistry registry,
             ServerEventListener events) {
@@ -36,6 +41,12 @@ public class RequestDispatcher {
         this.messageService = messageService;
         this.registry = registry;
         this.events = events;
+    }
+
+    /** 조직도를 연결한다 (ServerContext가 시작할 때 한 번). activeUser: 삭제되지 않은 사용자인가 (U55). */
+    public void setOrgChart(OrgChart orgChart, Predicate<String> activeUser) {
+        this.orgChart = orgChart;
+        this.activeUser = activeUser;
     }
 
     /** 요청을 처리하고 응답을 돌려준다. 응답이 없는 요청(LOGOUT, ACK 등)은 null. */
@@ -63,6 +74,8 @@ public class RequestDispatcher {
                 return null;
             case STATUS:
                 return messageService.status(session.getUserId(), request);
+            case ORG:
+                return org(request);
             case LOGOUT:
                 session.close(CloseReason.LOGOUT);
                 return null;
@@ -90,6 +103,15 @@ public class RequestDispatcher {
         session.send(result.getReply());                        // LOGIN_OK 먼저
         messageService.deliverPendingAsync(check.getUserId());  // 그다음 밀린 MSG (별도 스레드, U36)
         return null;
+    }
+
+    /** ORG → ORG_OK(org.txt 형식, 활성 사용자만) / ORG_NONE (설계서 2.10). */
+    private Packet org(Packet request) {
+        String text = orgChart == null ? null : orgChart.packetText(activeUser);
+        if (text == null) {
+            return Packet.replyTo(request, PacketType.ORG_NONE).put(HeaderKeys.REASON, OrgChart.NONE_REASON);
+        }
+        return Packet.replyTo(request, PacketType.ORG_OK).setText(text);
     }
 
     /** 요청의 reqId를 붙인 ERROR 응답. */
