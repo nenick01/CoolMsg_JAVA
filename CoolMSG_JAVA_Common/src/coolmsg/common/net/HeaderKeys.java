@@ -28,6 +28,18 @@ public final class HeaderKeys {
     public static final String MESSAGE_ID = "messageId";
     /** 서버가 정한 보낸 시각 (SEND_OK). MessageData.KEY_SENT_AT과 같은 값. */
     public static final String SENT_AT = "sentAt";
+    /** 상태 (RECEIPT: DELIVERED/READ). */
+    public static final String STATE = "state";
+    /** 상태가 바뀐 시각 (RECEIPT). */
+    public static final String AT = "at";
+    /** 대기 파일에서 꺼낸 지난 알림이면 true (RECEIPT, U51 — 클라이언트는 알림 창을 띄우지 않는다). */
+    public static final String QUEUED = "queued";
+    /** 접속 여부 (PRESENCE: true/false). */
+    public static final String ONLINE = "online";
+    /** STATUS_OK의 받는 사람별 상태 "state.{아이디}" 앞부분. 삭제된 사용자는 DELETED (U4). */
+    public static final String STATE_PREFIX = "state.";
+    /** STATUS_OK의 받는 사람별 읽은 시각 "readAt.{아이디}" 앞부분. */
+    public static final String READ_AT_PREFIX = "readAt.";
 
     private HeaderKeys() {
     }

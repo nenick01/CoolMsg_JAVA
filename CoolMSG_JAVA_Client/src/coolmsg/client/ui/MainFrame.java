@@ -26,7 +26,7 @@ import coolmsg.client.model.UserEntry;
  * 메인 화면 (설계서 4.3, 5장 U39~U41). 구현 4단계: 사용자 목록 + [메시지 쓰기] [메시지 관리함 (n)].
  *
  * - 사용자 목록은 LOGIN_OK로 받은 것을 등록 순서 그대로 보여 준다. 조직도(6단계)가 없으므로
- *   설계서 2.10의 "임시 표시"(등록 순서 한 줄 목록)에 해당한다. 접속 상태의 실시간 갱신(PRESENCE)은 5단계.
+ *   설계서 2.10의 "임시 표시"(등록 순서 한 줄 목록)에 해당한다. 접속 상태(●/○)는 PRESENCE로 바로 바뀐다(5단계).
  * - 목록에서 여러 명을 고르고(Ctrl·Shift 클릭) [메시지 쓰기]를 누르면 그 사람들이 받는 사람으로 채워진다(U40).
  * - [메시지 관리함 (n)]: n은 안 읽은 받은 메시지 수(U41).
  * - 메뉴 [로그아웃]은 로그인 화면으로, [종료]는 프로그램 종료.
@@ -37,6 +37,7 @@ public class MainFrame extends JFrame {
     private static final long serialVersionUID = 1L;
 
     private final JButton managerButton = new JButton("메시지 관리함");
+    private final DefaultListModel<UserEntry> model = new DefaultListModel<>();
 
     public MainFrame(ClientController controller, String userId, List<UserEntry> users) {
         super("CoolMsg - " + displayName(userId, users));
@@ -53,7 +54,6 @@ public class MainFrame extends JFrame {
         bar.add(file);
         setJMenuBar(bar);
 
-        DefaultListModel<UserEntry> model = new DefaultListModel<>();
         for (UserEntry u : users) {
             model.addElement(u);
         }
@@ -93,6 +93,17 @@ public class MainFrame extends JFrame {
 
         setSize(360, 520);
         setLocationRelativeTo(null);
+    }
+
+    /** 접속 상태가 바뀐 사람만 ●/○를 바꾼다 (PRESENCE, 설계서 2.5). 목록에 없는 사람은 무시(U50). */
+    public void setOnline(String userId, boolean online) {
+        for (int i = 0; i < model.size(); i++) {
+            UserEntry u = model.get(i);
+            if (u.getId().equals(userId)) {
+                model.set(i, new UserEntry(u.getId(), u.getName(), online));
+                return;
+            }
+        }
     }
 
     /** 안 읽은 받은 메시지 수를 버튼에 보여 준다: [메시지 관리함 (3)]. */

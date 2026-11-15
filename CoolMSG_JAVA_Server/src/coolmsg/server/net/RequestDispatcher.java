@@ -15,7 +15,7 @@ import coolmsg.server.service.MessageService;
  * - 로그인 전에 PING·LOGIN 외의 요청: ERROR "로그인이 필요합니다" (설계서 2.3)
  * - 첨부파일(UPLOAD·DOWNLOAD)과 아직 만들지 않은 명령: ERROR "지원하지 않는 기능"
  *
- * 구현 4단계까지: PING, LOGIN(+ 밀린 메시지), LOGOUT, SEND, ACK.
+ * 구현 5단계까지: PING, LOGIN(+ 밀린 메시지·알림), LOGOUT, SEND, ACK, READ, STATUS.
  *
  * 응답 순서가 중요한 요청(LOGIN, SEND)은 여기서 응답을 직접 대기열에 넣고 null을 돌려준다.
  *   LOGIN: LOGIN_OK → 밀린 MSG (3.8.5 ②)
@@ -58,6 +58,11 @@ public class RequestDispatcher {
             case ACK:
                 messageService.ack(session.getUserId(), request);
                 return null;
+            case READ:
+                messageService.read(session.getUserId(), request);
+                return null;
+            case STATUS:
+                return messageService.status(session.getUserId(), request);
             case LOGOUT:
                 session.close(CloseReason.LOGOUT);
                 return null;

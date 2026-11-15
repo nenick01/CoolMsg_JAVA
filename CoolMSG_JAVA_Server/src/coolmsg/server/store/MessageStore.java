@@ -114,6 +114,43 @@ public class MessageStore {
         }
     }
 
+    /** markRead의 결과. */
+    public enum ReadUpdate {
+        /** 이번에 읽음으로 바뀜 (delivered도 함께 true가 됐을 수 있다) */
+        CHANGED,
+        /** 이미 읽음 */
+        ALREADY,
+        /** 받는 사람·참조 대상이 아님, 또는 메시지가 없음 */
+        NOT_RECIPIENT
+    }
+
+    /**
+     * 읽음(READ) 기록 (설계서 3.8.5 ④): 메시지 잠금 안에서 읽기 → 확인 → 쓰기.
+     * delivered가 아직 false면 함께 true로 바꾼다(READ가 ACK보다 먼저 온 경우, 2.6). 이미 읽었으면 시각을 바꾸지 않는다.
+     */
+    public ReadUpdate markRead(String id, String userId, String at) throws IOException {
+        if (!isValidMessageId(id)) {
+            return ReadUpdate.NOT_RECIPIENT;
+        }
+        synchronized (locks.lockFor(id)) {
+            Path file = fileOf(id);
+            if (!Files.exists(file)) {
+                return ReadUpdate.NOT_RECIPIENT;
+            }
+            StoredMessage m = StoredMessage.from(HeaderBodyFile.read(file));
+            if (!m.isRecipient(userId)) {
+                return ReadUpdate.NOT_RECIPIENT;
+            }
+            if (m.getReadAt(userId) != null) {
+                return ReadUpdate.ALREADY;
+            }
+            m.markDelivered(userId);
+            m.markRead(userId, at);
+            m.getFile().write(file);
+            return ReadUpdate.CHANGED;
+        }
+    }
+
     /** 모든 메시지 ID (색인 다시 만들기용, 3.8.6). */
     public List<String> listIds() throws IOException {
         List<String> ids = new ArrayList<>();

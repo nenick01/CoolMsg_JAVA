@@ -29,6 +29,7 @@ import coolmsg.server.service.Outbox;
 import coolmsg.server.store.LockStripes;
 import coolmsg.server.store.MessageStore;
 import coolmsg.server.store.PendingIndex;
+import coolmsg.server.store.ReceiptQueue;
 import coolmsg.server.store.StoredMessage;
 
 /**
@@ -68,6 +69,9 @@ final class MessageTest {
 
         section.accept("MessageService - 저장소 열기·닫기 (3.8.6)");
         openClose();
+
+        section.accept("구현 5단계 - READ·RECEIPT·STATUS·밀린 알림 (2.6, U4, U49, U51, C4)");
+        readReceiptStatus();
     }
 
     // ===================================================================
@@ -323,6 +327,89 @@ final class MessageTest {
         check.accept("비정상 종료 뒤 시작 → 메시지 파일로 색인 복구", restarted.index.list("lee").equals(List.of(id)));
     }
 
+    private static Packet ack(String id) {
+        return new Packet(PacketType.ACK).put(HeaderKeys.MESSAGE_ID, id);
+    }
+
+    private static Packet read(String id) {
+        return new Packet(PacketType.READ).put(HeaderKeys.MESSAGE_ID, id);
+    }
+
+    private static void readReceiptStatus() throws Exception {
+        Env env = new Env();
+        env.service.openStorage();
+        env.outbox.online.add("kim");
+        String id = newId();
+        env.reply(send(id, "lee,choi", "", "읽어 주세요"));
+        env.outbox.clear();
+
+        env.outbox.online.add("lee");
+        env.service.ack("lee", ack(id));
+        List<Packet> toKim = env.outbox.sentTo("kim");
+        check.accept("ACK → 접속 중인 보낸 사람에게 RECEIPT(DELIVERED), 지난 알림 표시 없음",
+                toKim.size() == 1 && toKim.get(0).getType() == PacketType.RECEIPT
+                        && id.equals(toKim.get(0).get(HeaderKeys.MESSAGE_ID)) && "lee".equals(toKim.get(0).get(HeaderKeys.USER_ID))
+                        && "DELIVERED".equals(toKim.get(0).get(HeaderKeys.STATE)) && toKim.get(0).get(HeaderKeys.AT) != null
+                        && !toKim.get(0).has(HeaderKeys.QUEUED));
+        env.service.ack("lee", ack(id));
+        check.accept("같은 ACK 두 번 → RECEIPT는 한 번만 (실제로 바뀔 때만)", env.outbox.sentTo("kim").size() == 1);
+
+        env.service.read("lee", read(id));
+        toKim = env.outbox.sentTo("kim");
+        check.accept("READ → RECEIPT(READ), 메시지 파일에 읽은 시각(서버 기준)",
+                toKim.size() == 2 && "READ".equals(toKim.get(1).get(HeaderKeys.STATE))
+                        && toKim.get(1).get(HeaderKeys.AT).equals(env.store.load(id).getReadAt("lee")));
+        String firstAt = env.store.load(id).getReadAt("lee");
+        env.service.read("lee", read(id));
+        check.accept("같은 READ 다시(U49 재전송) → 시각 바뀌지 않음, 알림 없음",
+                env.outbox.sentTo("kim").size() == 2 && firstAt.equals(env.store.load(id).getReadAt("lee")));
+
+        env.outbox.online.remove("kim"); // 보낸 사람 오프라인
+        env.service.read("choi", read(id));
+        check.accept("ACK 없이 READ가 먼저 옴 → delivered도 true, 색인에서 빠짐",
+                env.store.load(id).isDelivered("choi") && env.index.list("choi").isEmpty());
+        check.accept("보낸 사람이 오프라인 → 대기 파일에 쌓임",
+                java.nio.file.Files.readString(env.root.resolve("receipts/kim.txt")).contains(id + "|choi|READ|"));
+        env.service.read("park", read(id));
+        check.accept("받는 사람이 아닌 사람의 READ는 무시", env.store.load(id).getReadAt("park") == null);
+
+        Packet st = env.service.status("kim", new Packet(PacketType.STATUS).setReqId(3).put(HeaderKeys.MESSAGE_ID, id));
+        check.accept("STATUS → 받는 사람별 상태와 읽은 시각",
+                st.getType() == PacketType.STATUS_OK && st.getReqId() == 3 && "READ".equals(st.get("state.lee"))
+                        && firstAt.equals(st.get("readAt.lee")) && "READ".equals(st.get("state.choi")));
+        Packet notSender = env.service.status("lee", new Packet(PacketType.STATUS).setReqId(4).put(HeaderKeys.MESSAGE_ID, id));
+        Packet missing = env.service.status("kim", new Packet(PacketType.STATUS).setReqId(5).put(HeaderKeys.MESSAGE_ID, newId()));
+        check.accept("보낸 사람이 아님 / 없는 메시지 → STATUS_FAIL",
+                notSender.getType() == PacketType.STATUS_FAIL && missing.getType() == PacketType.STATUS_FAIL);
+
+        String id2 = newId();
+        env.outbox.online.add("kim");
+        env.reply(send(id2, "lee,choi", "", "두 번째"));
+        env.users.delete("choi"); // 받는 사람 삭제 (U4)
+        Packet st2 = env.service.status("kim", new Packet(PacketType.STATUS).setReqId(6).put(HeaderKeys.MESSAGE_ID, id2));
+        check.accept("받는 사람이 삭제됨 → DELETED, 아직 안 받은 사람 → SENT",
+                "DELETED".equals(st2.get("state.choi")) && "SENT".equals(st2.get("state.lee")));
+
+        // 로그인 때 밀린 알림: LOGIN_OK → 밀린 MSG → 밀린 RECEIPT(queued=true)
+        env.outbox.clear();
+        env.service.deliverPending("kim");
+        List<Packet> pending = env.outbox.sentTo("kim");
+        check.accept("로그인 때 밀린 RECEIPT를 queued=true로 보내고 대기 파일 비움",
+                pending.size() == 1 && pending.get(0).getType() == PacketType.RECEIPT
+                        && "true".equals(pending.get(0).get(HeaderKeys.QUEUED))
+                        && !java.nio.file.Files.exists(env.root.resolve("receipts/kim.txt")));
+
+        // 보내다 끊긴 경우: 못 보낸 것은 다시 쌓임
+        env.outbox.online.remove("kim");
+        env.service.read("lee", read(id2));
+        env.outbox.online.add("kim");
+        env.outbox.failSends = true;
+        env.service.deliverPending("kim");
+        env.outbox.failSends = false;
+        check.accept("밀린 알림을 보내다 끊기면 대기 파일에 다시 넣음 (C4)",
+                java.nio.file.Files.readString(env.root.resolve("receipts/kim.txt")).contains(id2 + "|lee|READ|"));
+    }
+
     // ===================================================================
     // 도우미
     // ===================================================================
@@ -362,6 +449,7 @@ final class MessageTest {
         final PendingIndex index;
         final FakeOutbox outbox;
         final MessageService service;
+        final UserDirectory users;
         final List<String> logs = Collections.synchronizedList(new ArrayList<>());
         /** 응답과 MSG가 나간 순서 ("reply" 또는 받는 사람 아이디). */
         final List<String> order;
@@ -376,7 +464,8 @@ final class MessageTest {
             this.outbox = new FakeOutbox(order);
             this.store = new MessageStore(root.resolve("messages"));
             this.index = new PendingIndex(root.resolve("pending"));
-            this.service = new MessageService(store, index, users(), outbox, this);
+            this.users = users();
+            this.service = new MessageService(store, index, new ReceiptQueue(root.resolve("receipts")), users, outbox, this);
         }
 
         Packet reply(Packet request) {
@@ -429,6 +518,8 @@ final class MessageTest {
         private final Map<String, List<Packet>> sent = new HashMap<>();
         private final List<String> order;
         int paced;
+        /** true면 sendWhenRoom이 실패 (보내다 연결이 끊긴 경우 흉내). */
+        boolean failSends;
 
         FakeOutbox(List<String> order) {
             this.order = order;
@@ -451,6 +542,9 @@ final class MessageTest {
 
         @Override
         public synchronized boolean sendWhenRoom(String userId, Packet packet) {
+            if (failSends) {
+                return false;
+            }
             boolean ok = send(userId, packet);
             if (ok) {
                 paced++;

@@ -17,6 +17,7 @@ import coolmsg.server.service.LoginService;
 import coolmsg.server.service.MessageService;
 import coolmsg.server.store.MessageStore;
 import coolmsg.server.store.PendingIndex;
+import coolmsg.server.store.ReceiptQueue;
 
 /**
  * 서버의 공유 객체를 딱 하나씩 만들어 연결하는 곳 (설계서 3.1).
@@ -57,7 +58,8 @@ public class ServerContext {
         this.loginService = new LoginService(serverConfig, userDirectory);
         this.messageStore = new MessageStore(dataDir.resolve("messages"));
         this.pendingIndex = new PendingIndex(dataDir.resolve("pending"));
-        this.messageService = new MessageService(messageStore, pendingIndex, userDirectory, sessionRegistry, events);
+        this.messageService = new MessageService(messageStore, pendingIndex,
+                new ReceiptQueue(dataDir.resolve("receipts")), userDirectory, sessionRegistry, events);
         this.dispatcher = new RequestDispatcher(loginService, messageService, sessionRegistry, events);
         this.serverListener = new ServerListener(serverConfig.getPort(), dispatcher, sessionRegistry, events);
         this.serverListener.setStorageHooks(new StorageHooks() {

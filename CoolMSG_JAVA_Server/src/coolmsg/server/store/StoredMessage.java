@@ -14,11 +14,12 @@ import coolmsg.common.model.MessageData;
  *
  * MessageData는 Common 공용이라 서버 전용 정보(delivered.*, readAt.*)를 넣지 않는다.
  * 서버 전용 정보는 이 클래스가 HeaderBodyFile의 키로 함께 들고 있다.
- * (읽음 readAt.*은 5단계에서 쓴다. 지금은 파일에 있으면 보존만 한다.)
+ * 읽은 시각 readAt.{아이디}는 읽었을 때만 줄이 생긴다(5단계).
  */
 public class StoredMessage {
 
     public static final String KEY_DELIVERED_PREFIX = "delivered.";
+    public static final String KEY_READ_AT_PREFIX = "readAt.";
 
     private final MessageData data;
     private final HeaderBodyFile file;
@@ -68,5 +69,14 @@ public class StoredMessage {
 
     void markDelivered(String userId) {
         file.put(KEY_DELIVERED_PREFIX + userId, "true");
+    }
+
+    /** 읽은 시각 (서버가 READ를 받은 시각, U49). 안 읽었으면 null. */
+    public String getReadAt(String userId) {
+        return file.get(KEY_READ_AT_PREFIX + userId);
+    }
+
+    void markRead(String userId, String at) {
+        file.put(KEY_READ_AT_PREFIX + userId, at);
     }
 }

@@ -8,7 +8,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import coolmsg.common.net.HeaderKeys;
 import coolmsg.common.net.Packet;
+import coolmsg.common.net.PacketType;
 import coolmsg.server.ServerEventListener;
 import coolmsg.server.service.Outbox;
 
@@ -25,6 +27,9 @@ import coolmsg.server.service.Outbox;
  *   잠금 안에서는 다른 객체에 알리거나(화면) 보내지 않는다. 바뀐 결과는 잠금을 푼 뒤 알린다.
  *
  * 서비스(MessageService)가 "이 사람에게 보내 달라"고 할 때 쓰는 Outbox도 여기서 구현한다.
+ *
+ * 접속 상태(PRESENCE, 설계서 2.5): 아이디가 실제로 접속 목록에 들어오거나 빠질 때만, 접속 중인 다른 사람 모두에게 알린다.
+ * 같은 아이디가 다른 곳에서 다시 로그인하면(U30) 그 사람은 계속 접속 중이므로 알리지 않는다(C3: 옛 연결이 닫혀도 빠지지 않음).
  */
 public class SessionRegistry implements Outbox {
 
@@ -71,14 +76,17 @@ public class SessionRegistry implements Outbox {
             return;
         }
         List<String> snapshot = null;
+        List<ClientSession> others = null;
         synchronized (this) {
             if (byUser.get(userId) == session) {
                 byUser.remove(userId);
                 snapshot = List.copyOf(byUser.keySet());
+                others = List.copyOf(byUser.values());
             }
         }
         if (snapshot != null) {
             events.onOnlineUsersChanged(snapshot); // 잠금 밖에서 알린다
+            broadcastPresence(others, userId, false);
         }
     }
 
@@ -91,14 +99,32 @@ public class SessionRegistry implements Outbox {
         ClientSession previous;
         Packet reply;
         List<String> snapshot;
+        List<ClientSession> others = new java.util.ArrayList<>();
         synchronized (this) {
             previous = byUser.put(userId, session);
             session.setUserId(userId);
             reply = replyBuilder.apply(byUser::containsKey);
             snapshot = List.copyOf(byUser.keySet());
+            for (ClientSession s : byUser.values()) {
+                if (s != session) {
+                    others.add(s);
+                }
+            }
         }
         events.onOnlineUsersChanged(snapshot);
+        if (previous == null) { // 새로 접속 (다시 로그인한 경우는 이미 접속 중으로 보이므로 알리지 않음)
+            broadcastPresence(others, userId, true);
+        }
         return new LoginResult(reply, previous == session ? null : previous);
+    }
+
+    /** 접속 상태 변경을 다른 사람들에게 (잠금 밖에서, 대기열에 넣기만 함). */
+    private static void broadcastPresence(List<ClientSession> targets, String userId, boolean online) {
+        Packet p = new Packet(PacketType.PRESENCE).put(HeaderKeys.USER_ID, userId)
+                .put(HeaderKeys.ONLINE, Boolean.toString(online));
+        for (ClientSession s : targets) {
+            s.send(p);
+        }
     }
 
     /** 지금 로그인해 있는가. */

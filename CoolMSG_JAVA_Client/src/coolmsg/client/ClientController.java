@@ -10,6 +10,7 @@ import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
+import coolmsg.client.model.MailItem;
 import coolmsg.client.model.UserEntry;
 import coolmsg.client.net.Connection;
 import coolmsg.client.net.ConnectionTester;
@@ -26,8 +27,10 @@ import coolmsg.client.ui.MessageManagerFrame;
 import coolmsg.client.ui.Toast;
 import coolmsg.common.FormatException;
 import coolmsg.common.ProtocolInfo;
+import coolmsg.common.model.DeliveryState;
 import coolmsg.common.model.HtmlText;
 import coolmsg.common.model.MessageData;
+import coolmsg.common.net.HeaderKeys;
 import coolmsg.common.net.Packet;
 import coolmsg.common.net.PacketType;
 
@@ -66,11 +69,16 @@ public class ClientController implements Connection.Listener {
     // 새 메시지 알림 묶기 (Swing 스레드에서만)
     private final List<MessageData> unnotified = new ArrayList<>();
     private final Timer notifyTimer;
+    // 읽음 알림 묶기 (U51, Swing 스레드에서만): [messageId, 읽은 사람]
+    private final List<String[]> unnotifiedReads = new ArrayList<>();
+    private final Timer readNotifyTimer;
 
     public ClientController(ClientPaths paths) {
         this.paths = paths;
         this.notifyTimer = new Timer(NOTIFY_BATCH_MILLIS, e -> flushNotifications());
         this.notifyTimer.setRepeats(false);
+        this.readNotifyTimer = new Timer(NOTIFY_BATCH_MILLIS, e -> flushReadNotifications());
+        this.readNotifyTimer.setRepeats(false);
     }
 
     /** 프로그램 시작: 저장된 서버 주소·아이디를 채운 로그인 화면을 띄운다. Swing 스레드에서 부른다. */
@@ -127,6 +135,9 @@ public class ClientController implements Connection.Listener {
             connection = c;
             users = r.getUsers();
             heartbeat = new Heartbeat(a);
+            for (String id : mailbox.unreportedReads()) { // 끊겨서 못 알린 READ를 다시 보낸다 (U49)
+                reportRead(id);
+            }
             return new LoginOutcome(true, null, userId, r.getUsers());
         } catch (IOException e) {
             api = null;
@@ -205,10 +216,138 @@ public class ClientController implements Connection.Listener {
 
     @Override
     public void onPacket(Packet packet) {
-        if (packet.getType() == PacketType.MSG) {
-            onMessage(packet);
+        switch (packet.getType()) {
+            case MSG:
+                onMessage(packet);
+                break;
+            case PRESENCE:
+                onPresence(packet);
+                break;
+            case RECEIPT:
+                onReceipt(packet);
+                break;
+            default:
+                break; // 모르는 알림은 무시
         }
-        // PRESENCE, RECEIPT는 5단계
+    }
+
+    /** 접속 상태 변경: 목록의 ●/○만 바꾼다 (2.5). 목록에 없는 사람(로그인 뒤 추가된 사용자)은 다음 로그인 때 (U50). */
+    private void onPresence(Packet packet) {
+        String userId = packet.get(HeaderKeys.USER_ID);
+        boolean online = "true".equals(packet.get(HeaderKeys.ONLINE));
+        if (userId == null) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            List<UserEntry> updated = new ArrayList<>();
+            for (UserEntry u : users) {
+                updated.add(u.getId().equals(userId) ? new UserEntry(u.getId(), u.getName(), online) : u);
+            }
+            users = List.copyOf(updated);
+            if (mainFrame != null) {
+                mainFrame.setOnline(userId, online);
+            }
+        });
+    }
+
+    /** 내가 보낸 메시지의 수신·읽음 알림: 보낸 내역에 반영(앞으로만), 접속 중에 온 READ면 알림 창 (U51). */
+    private void onReceipt(Packet packet) {
+        Mailbox box = mailbox;
+        if (box == null) {
+            return;
+        }
+        String messageId = packet.get(HeaderKeys.MESSAGE_ID);
+        String userId = packet.get(HeaderKeys.USER_ID);
+        DeliveryState state = DeliveryState.fromName(packet.get(HeaderKeys.STATE));
+        boolean changed;
+        try {
+            changed = box.applyReceipt(messageId, userId, state, packet.get(HeaderKeys.AT));
+        } catch (IOException e) {
+            System.err.println("수신·읽음 알림을 저장하지 못했습니다: " + e.getMessage());
+            return;
+        }
+        if (!changed) {
+            return; // 보낸 내역에 없거나(지움) 이미 반영됨
+        }
+        boolean notify = state == DeliveryState.READ && !"true".equals(packet.get(HeaderKeys.QUEUED));
+        SwingUtilities.invokeLater(() -> {
+            refreshViews();
+            if (notify) {
+                unnotifiedReads.add(new String[] {messageId, userId});
+                if (!readNotifyTimer.isRunning()) {
+                    readNotifyTimer.start();
+                }
+            }
+        });
+    }
+
+    /** 읽음 알림 창: 1건이면 "이영희님이 메시지를 읽었습니다", 여러 건이면 "n건의 읽음 알림" (U51). */
+    private void flushReadNotifications() {
+        if (unnotifiedReads.isEmpty() || mailbox == null || mainFrame == null) {
+            unnotifiedReads.clear();
+            return;
+        }
+        List<String[]> batch = new ArrayList<>(unnotifiedReads);
+        unnotifiedReads.clear();
+        if (batch.size() == 1) {
+            String messageId = batch.get(0)[0];
+            String preview = "";
+            for (MailItem m : mailbox.sent()) {
+                if (m.getMessageId().equals(messageId)) {
+                    preview = HtmlText.preview(m.getData().getBody(), 30);
+                }
+            }
+            Toast.show(Toast.Kind.READ_RECEIPT, nameOf(batch.get(0)[1]) + "님이 메시지를 읽었습니다", preview,
+                    () -> openSent(messageId));
+        } else {
+            Toast.show(Toast.Kind.READ_RECEIPT, batch.size() + "건의 읽음 알림", null, () -> openManager(false));
+        }
+    }
+
+    /** 읽음 알림 창을 눌렀을 때(1건): 보낸 메시지 탭에서 그 줄을 고른다. */
+    private void openSent(String messageId) {
+        openManager(false);
+        if (managerFrame != null) {
+            managerFrame.select(messageId, false);
+        }
+    }
+
+    /** 서버에 READ를 알리고, 대기열에 넣었으면 알렸다고 기록한다 (U49). */
+    private void reportRead(String messageId) {
+        ServerApi a = api;
+        Mailbox box = mailbox;
+        if (a == null || box == null || !a.read(messageId)) {
+            return; // 다음 로그인 때 다시
+        }
+        try {
+            box.markReadReported(messageId);
+        } catch (IOException e) {
+            System.err.println("읽음 알림 기록을 저장하지 못했습니다(다음 로그인 때 다시 보냄): " + e.getMessage());
+        }
+    }
+
+    /**
+     * 보낸 메시지의 받는 사람별 상태를 서버에 묻고 보낸 내역에 반영한다 (STATUS, 2.6).
+     * 관리함에서 보낸 메시지를 고를 때와 [새로고침] 때 부른다. 응답은 다른 스레드에서 기다린다.
+     */
+    public void requestStatus(String messageId) {
+        ServerApi a = api;
+        Mailbox box = mailbox;
+        if (a == null || box == null) {
+            return;
+        }
+        Thread t = new Thread(() -> {
+            try {
+                Packet reply = a.status(messageId);
+                if (reply.getType() == PacketType.STATUS_OK && box.applyStatus(messageId, reply.getHeader())) {
+                    SwingUtilities.invokeLater(this::refreshViews);
+                }
+            } catch (IOException e) {
+                System.err.println("상태 조회 실패: " + e.getMessage()); // 마지막으로 저장한 상태를 그대로 보여 준다
+            }
+        }, "status");
+        t.setDaemon(true);
+        t.start();
     }
 
     /** 새 메시지: 저장 → ACK → 화면 (4.1). 받기 스레드에서 불린다. */
@@ -262,10 +401,10 @@ public class ClientController implements Connection.Listener {
         unnotified.clear();
         if (batch.size() == 1) {
             MessageData d = batch.get(0);
-            Toast.show("새 메시지: " + nameOf(d.getSender()), HtmlText.preview(d.getBody(), 30),
+            Toast.show(Toast.Kind.NEW_MESSAGE, "새 메시지: " + nameOf(d.getSender()), HtmlText.preview(d.getBody(), 30),
                     () -> openReceived(d.getMessageId()));
         } else {
-            Toast.show(batch.size() + "개의 새 메시지", null, () -> openManager(true));
+            Toast.show(Toast.Kind.NEW_MESSAGE, batch.size() + "개의 새 메시지", null, () -> openManager(true));
         }
     }
 
@@ -359,14 +498,16 @@ public class ClientController implements Connection.Listener {
         managerFrame.toFront();
     }
 
-    /** 받은 메시지를 읽음으로 표시한다 (관리함에서 줄을 골랐을 때, U48). 5단계에서는 여기서 READ를 한 번만 보낸다. */
+    /** 받은 메시지를 읽음으로 표시한다 (관리함에서 줄을 골랐을 때, U48). 처음 읽었을 때 한 번만 READ를 보낸다. */
     public void markRead(String messageId) {
         Mailbox box = mailbox;
         if (box == null) {
             return;
         }
         try {
-            box.markRead(messageId);
+            if (box.markRead(messageId)) {
+                reportRead(messageId); // 처음 읽었을 때 한 번만 READ (2.6)
+            }
         } catch (IOException e) {
             System.err.println("읽음 표시를 저장하지 못했습니다: " + e.getMessage());
         }
@@ -480,6 +621,8 @@ public class ClientController implements Connection.Listener {
     private void closeLoggedInWindows() {
         notifyTimer.stop();
         unnotified.clear();
+        readNotifyTimer.stop();
+        unnotifiedReads.clear();
         Toast.close();
         for (Window w : childWindows) {
             w.dispose();

@@ -24,6 +24,7 @@ import javax.swing.table.DefaultTableCellRenderer;
 
 import coolmsg.client.ClientController;
 import coolmsg.client.model.MailItem;
+import coolmsg.common.model.DeliveryState;
 import coolmsg.common.model.HtmlText;
 import coolmsg.common.model.MessageData;
 
@@ -34,7 +35,8 @@ import coolmsg.common.model.MessageData;
  *   받은 메시지: 보낸 사람 | 날짜·시간 | 내용 미리보기(30자) / 보낸 메시지: 받는 사람("이영희 외 2명") | 날짜·시간 | 내용
  * - 줄을 고르면 오른쪽에 머리글(보낸 사람, 받는 사람, 참조, 보낸 시각)과 본문. 별도 보기 창은 없다(U48).
  * - 받은 메시지는 고르는 즉시 읽음 (5단계에서 이때 READ).
- * - 아래 단추: [삭제](확인 창, 내 PC에서만) [닫기]. 회신·전달은 7단계.
+ * - 보낸 메시지: 목록에 읽음 요약 열(1/3), 오른쪽 본문 아래에 받는 사람별 읽음 확인. 고를 때와 [새로고침] 때 STATUS로 맞춘다(5단계).
+ * - 아래 단추: [새로고침](보낸 메시지 탭) [삭제](확인 창, 내 PC에서만) [닫기]. 회신·전달은 7단계.
  * 목록은 컨트롤러가 refresh()로 다시 채운다. Swing 스레드에서만 쓴다.
  */
 public class MessageManagerFrame extends JFrame {
@@ -54,8 +56,10 @@ public class MessageManagerFrame extends JFrame {
     private final JTable sentTable;
     private final JEditorPane detail = new JEditorPane("text/html", EMPTY_HTML);
     private final JButton deleteButton = new JButton("삭제");
-    /** 오른쪽에 지금 보여 주는 메시지 ID (같은 메시지면 다시 그리지 않아 스크롤 위치를 지킨다). */
+    private final JButton refreshButton = new JButton("새로고침");
+    /** 오른쪽에 지금 보여 주는 메시지 ID와 HTML (같으면 다시 그리지 않아 스크롤 위치를 지킨다). */
     private String shownId;
+    private String shownHtml;
     /** 목록을 다시 채우는 중 (그동안 선택이 잠깐 풀리는 이벤트는 무시한다 — 읽던 본문의 스크롤이 튀지 않게). */
     private boolean reloading;
 
@@ -81,8 +85,15 @@ public class MessageManagerFrame extends JFrame {
 
         JButton close = new JButton("닫기");
         deleteButton.addActionListener(e -> deleteSelected());
+        refreshButton.addActionListener(e -> {
+            MailItem item = selectedItem();
+            if (item != null && !inboxSelected()) {
+                controller.requestStatus(item.getMessageId());
+            }
+        });
         close.addActionListener(e -> dispose());
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttons.add(refreshButton);
         buttons.add(deleteButton);
         buttons.add(close);
 
@@ -149,18 +160,28 @@ public class MessageManagerFrame extends JFrame {
     /** 고른 줄의 내용을 오른쪽에 보여 준다. 안 읽은 받은 메시지면 읽음으로 표시한다(U48). */
     private void showSelected() {
         MailItem item = selectedItem();
+        boolean inbox = inboxSelected();
         deleteButton.setEnabled(item != null);
+        refreshButton.setVisible(!inbox);
+        refreshButton.setEnabled(item != null);
         if (item == null) {
             if (shownId != null) {
                 shownId = null;
+                shownHtml = null;
                 detail.setText(EMPTY_HTML);
             }
             return;
         }
-        if (!item.getMessageId().equals(shownId)) {
+        String html = toHtml(item, inbox);
+        boolean newMessage = !item.getMessageId().equals(shownId);
+        if (newMessage || !html.equals(shownHtml)) { // 다른 메시지이거나 읽음 상태가 바뀜
             shownId = item.getMessageId();
-            detail.setText(toHtml(item.getData()));
+            shownHtml = html;
+            detail.setText(html);
             detail.setCaretPosition(0); // 맨 위부터
+        }
+        if (newMessage && !inbox) {
+            controller.requestStatus(item.getMessageId()); // 보낸 메시지를 열 때 최신 상태로 (2.6)
         }
         if (inboxSelected() && !item.isRead()) {
             controller.markRead(item.getMessageId()); // → 컨트롤러가 refresh()를 부른다
@@ -168,7 +189,8 @@ public class MessageManagerFrame extends JFrame {
     }
 
     /** 오른쪽 영역 HTML: 머리글 표 + 본문. 이름은 특수 문자를 바꿔 넣는다(본문만 HTML). */
-    private String toHtml(MessageData d) {
+    private String toHtml(MailItem item, boolean inbox) {
+        MessageData d = item.getData();
         StringBuilder sb = new StringBuilder();
         sb.append("<html><body style='font-family:sans-serif; margin:0'>");
         sb.append("<table width='100%' cellpadding='4' cellspacing='0' bgcolor='#F3F6FA'>");
@@ -180,8 +202,41 @@ public class MessageManagerFrame extends JFrame {
         row(sb, "보낸 시각", d.getSentAt() == null ? "" : MailItem.LIST_TIME.format(d.getSentAt()));
         sb.append("</table><hr>");
         sb.append("<div style='padding:6px'>").append(d.getBody()).append("</div>");
+        if (!inbox) {
+            appendReadStatus(sb, item);
+        }
         sb.append("</body></html>");
         return sb.toString();
+    }
+
+    /** 보낸 메시지 본문 아래 읽음 확인 (설계서 4.3): ● 읽음 시각 / ○ 안 읽음 / ○ 전송됨 / 삭제된 사용자. */
+    private void appendReadStatus(StringBuilder sb, MailItem item) {
+        sb.append("<hr><div style='padding:6px'><b>읽음 확인 (").append(item.readSummary()).append(")</b>");
+        sb.append("<table cellpadding='2' cellspacing='0'>");
+        for (String id : item.recipients()) {
+            String mark;
+            String text;
+            if (item.isDeletedUser(id)) {
+                mark = "&nbsp;";
+                text = "<font color='#999999'>삭제된 사용자</font>";
+            } else if (item.stateOf(id) == DeliveryState.READ) {
+                mark = "<font color='#2E7D32'>●</font>";
+                text = "읽음 &nbsp;" + item.readAtText(id);
+            } else if (item.stateOf(id) == DeliveryState.DELIVERED) {
+                mark = "○";
+                text = "안 읽음";
+            } else {
+                mark = "○";
+                text = "<font color='#999999'>전송됨 (아직 받지 않음)</font>";
+            }
+            String who = HtmlText.fromPlain(controller.nameOf(id));
+            if (item.getData().getCc().contains(id) && !item.getData().getReceivers().contains(id)) {
+                who += " (참조)";
+            }
+            sb.append("<tr><td>").append(mark).append("</td><td>").append(who).append("</td><td>")
+                    .append(text).append("</td></tr>");
+        }
+        sb.append("</table></div>");
     }
 
     private static void row(StringBuilder sb, String label, String value) {
@@ -220,6 +275,9 @@ public class MessageManagerFrame extends JFrame {
         table.getColumnModel().getColumn(0).setPreferredWidth(110);
         table.getColumnModel().getColumn(1).setPreferredWidth(125);
         table.getColumnModel().getColumn(2).setPreferredWidth(180);
+        if (table.getColumnCount() > 3) {
+            table.getColumnModel().getColumn(3).setPreferredWidth(45); // 읽음 요약
+        }
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             private static final long serialVersionUID = 1L;
 
@@ -282,7 +340,7 @@ public class MessageManagerFrame extends JFrame {
 
         @Override
         public int getColumnCount() {
-            return 3;
+            return inbox ? 3 : 4; // 보낸 메시지에는 읽음 요약 열 (5단계)
         }
 
         @Override
@@ -292,8 +350,10 @@ public class MessageManagerFrame extends JFrame {
                     return inbox ? "보낸 사람" : "받는 사람";
                 case 1:
                     return "날짜/시간";
-                default:
+                case 2:
                     return "내용";
+                default:
+                    return "읽음";
             }
         }
 
@@ -306,8 +366,10 @@ public class MessageManagerFrame extends JFrame {
                             : controller.describeReceivers(m.getData().getReceivers());
                 case 1:
                     return m.sentAtText();
-                default:
+                case 2:
                     return HtmlText.preview(m.getData().getBody(), PREVIEW_CHARS);
+                default:
+                    return m.readSummary();
             }
         }
     }

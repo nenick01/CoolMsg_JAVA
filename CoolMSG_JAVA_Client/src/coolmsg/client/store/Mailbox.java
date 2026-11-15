@@ -10,18 +10,20 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import coolmsg.client.model.MailItem;
 import coolmsg.common.FormatException;
 import coolmsg.common.file.HeaderBodyFile;
+import coolmsg.common.model.DeliveryState;
 import coolmsg.common.model.MessageData;
 
 /**
  * 내 PC의 보관함 ~/.coolmsg/{아이디}/ (설계서 4.2, 5장 U38).
  *
- *   inbox/{messageId}.txt   받은 메시지 (+ read=true/false)
- *   sent/{messageId}.txt    보낸 메시지
+ *   inbox/{messageId}.txt   받은 메시지 (+ read, readReported — 서버에 READ를 알렸는지, U49)
+ *   sent/{messageId}.txt    보낸 메시지 (+ 받는 사람별 state.*, readAt.*, deletedUser.* — 5단계)
  *   deleted.txt             지운 받은 메시지의 ID (한 줄에 하나)
  *
  * 받기 스레드(새 메시지 저장)와 Swing 스레드(목록, 읽음, 삭제)가 함께 쓰므로 모든 메서드를 synchronized로 한다.
@@ -30,6 +32,7 @@ import coolmsg.common.model.MessageData;
 public class Mailbox {
 
     public static final String KEY_READ = "read";
+    public static final String KEY_READ_REPORTED = "readReported";
 
     private final Path inboxDir;
     private final Path sentDir;
@@ -69,6 +72,7 @@ public class Mailbox {
         }
         HeaderBodyFile f = new HeaderBodyFile(data.toHeader(), data.getBody());
         f.put(KEY_READ, "false");
+        f.put(KEY_READ_REPORTED, "false");
         Files.createDirectories(inboxDir);
         f.write(file);
         return ReceiveResult.SAVED;
@@ -116,8 +120,121 @@ public class Mailbox {
             return false;
         }
         f.put(KEY_READ, "true");
+        f.put(KEY_READ_REPORTED, "false"); // 서버에 READ를 알리면 markReadReported로 true (U49)
         f.write(file);
         return true;
+    }
+
+    /** 서버에 READ를 알렸다고 기록한다 (U49). */
+    public synchronized void markReadReported(String messageId) throws IOException {
+        if (!MessageData.isValidMessageId(messageId)) {
+            return;
+        }
+        Path file = inboxDir.resolve(messageId + ".txt");
+        if (!Files.exists(file)) {
+            return;
+        }
+        HeaderBodyFile f = HeaderBodyFile.read(file);
+        f.put(KEY_READ_REPORTED, "true");
+        f.write(file);
+    }
+
+    /** 읽었지만 서버에 아직 알리지 못한 받은 메시지 ID들 (로그인 때 다시 보낸다, U49). */
+    public synchronized List<String> unreportedReads() {
+        List<String> ids = new ArrayList<>();
+        if (!Files.isDirectory(inboxDir)) {
+            return ids;
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(inboxDir, "*.txt")) {
+            for (Path p : stream) {
+                try {
+                    HeaderBodyFile f = HeaderBodyFile.read(p);
+                    if ("true".equals(f.get(KEY_READ)) && "false".equals(f.get(KEY_READ_REPORTED))) {
+                        ids.add(f.get(MessageData.KEY_MESSAGE_ID));
+                    }
+                } catch (IOException e) {
+                    System.err.println("보관함 파일을 읽지 못해 건너뜁니다: " + p + " (" + e.getMessage() + ")");
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("보관함 폴더를 읽지 못했습니다: " + inboxDir);
+        }
+        return ids;
+    }
+
+    /**
+     * 보낸 메시지에 RECEIPT를 반영한다. 지금 기록보다 앞선 상태일 때만 바꾼다(2.6 "앞으로만").
+     * 보낸 내역에 없으면(지운 메시지) 무시한다.
+     *
+     * @return 실제로 바뀌었으면 true
+     */
+    public synchronized boolean applyReceipt(String messageId, String userId, DeliveryState state, String at)
+            throws IOException {
+        HeaderBodyFile f = readSent(messageId);
+        if (f == null || state == null) {
+            return false;
+        }
+        if (!applyState(f, userId, state, at)) {
+            return false;
+        }
+        f.write(sentDir.resolve(messageId + ".txt"));
+        return true;
+    }
+
+    /** STATUS_OK의 받는 사람별 상태를 반영한다. 삭제된 사용자(DELETED)는 따로 표시한다(U4). */
+    public synchronized boolean applyStatus(String messageId, Map<String, String> statusHeader) throws IOException {
+        HeaderBodyFile f = readSent(messageId);
+        if (f == null) {
+            return false;
+        }
+        boolean changed = false;
+        for (Map.Entry<String, String> e : statusHeader.entrySet()) {
+            if (!e.getKey().startsWith(MailItem.KEY_STATE_PREFIX)) {
+                continue;
+            }
+            String userId = e.getKey().substring(MailItem.KEY_STATE_PREFIX.length());
+            String deletedKey = MailItem.KEY_DELETED_USER_PREFIX + userId;
+            if ("DELETED".equals(e.getValue())) {
+                if (!"true".equals(f.get(deletedKey))) {
+                    f.put(deletedKey, "true");
+                    changed = true;
+                }
+                continue;
+            }
+            if (f.has(deletedKey)) { // 복구된 사용자
+                f.remove(deletedKey);
+                changed = true;
+            }
+            changed |= applyState(f, userId, DeliveryState.fromName(e.getValue()),
+                    statusHeader.get(MailItem.KEY_READ_AT_PREFIX + userId));
+        }
+        if (changed) {
+            f.write(sentDir.resolve(messageId + ".txt"));
+        }
+        return changed;
+    }
+
+    private static boolean applyState(HeaderBodyFile f, String userId, DeliveryState state, String at) {
+        if (state == null) {
+            return false;
+        }
+        DeliveryState current = DeliveryState.fromName(f.get(MailItem.KEY_STATE_PREFIX + userId));
+        if (!state.isAfter(current)) {
+            return false; // 같거나 뒤처진 상태는 무시 (같은 RECEIPT 두 번, 늦게 온 DELIVERED)
+        }
+        f.put(MailItem.KEY_STATE_PREFIX + userId, state.name());
+        if (state == DeliveryState.READ && at != null) {
+            f.put(MailItem.KEY_READ_AT_PREFIX + userId, at);
+        }
+        return true;
+    }
+
+    private HeaderBodyFile readSent(String messageId) throws IOException {
+        if (!MessageData.isValidMessageId(messageId)) {
+            return null;
+        }
+        Path file = sentDir.resolve(messageId + ".txt");
+        return Files.exists(file) ? HeaderBodyFile.read(file) : null;
     }
 
     /** 받은 메시지 삭제: 파일은 지우고 ID만 deleted.txt에 남긴다 (U38). 내 PC에서만 지운다. */
@@ -152,7 +269,7 @@ public class Mailbox {
                 try {
                     HeaderBodyFile f = HeaderBodyFile.read(p);
                     MessageData data = MessageData.fromHeader(f.getHeader(), f.getBody());
-                    items.add(new MailItem(data, !inbox || "true".equals(f.get(KEY_READ))));
+                    items.add(new MailItem(data, !inbox || "true".equals(f.get(KEY_READ)), f.getHeader()));
                 } catch (IOException e) {
                     System.err.println("보관함 파일을 읽지 못해 건너뜁니다: " + p + " (" + e.getMessage() + ")");
                 }

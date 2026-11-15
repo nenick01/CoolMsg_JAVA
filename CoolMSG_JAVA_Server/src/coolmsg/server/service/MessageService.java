@@ -11,6 +11,7 @@ import java.util.function.Consumer;
 import coolmsg.common.FormatException;
 import coolmsg.common.ProtocolInfo;
 import coolmsg.common.file.TimeFormat;
+import coolmsg.common.model.DeliveryState;
 import coolmsg.common.model.HtmlText;
 import coolmsg.common.model.MessageData;
 import coolmsg.common.net.HeaderKeys;
@@ -21,10 +22,14 @@ import coolmsg.server.config.UserAccount;
 import coolmsg.server.config.UserDirectory;
 import coolmsg.server.store.MessageStore;
 import coolmsg.server.store.PendingIndex;
+import coolmsg.server.store.ReceiptQueue;
 import coolmsg.server.store.StoredMessage;
 
 /**
- * 메시지 보내기·수신 확인·밀린 메시지 전달 업무 규칙 (설계서 3.8.5, 5장 U5·U35·U36).
+ * 메시지 보내기·수신 확인·읽음·상태 조회·밀린 메시지 전달 업무 규칙 (설계서 2.6, 3.8.5, 5장 U5·U35·U36·U49·U51).
+ *
+ * 받는 사람이 ACK·READ를 보내 상태가 실제로 바뀌면 보낸 사람에게 RECEIPT를 보낸다.
+ * 보낸 사람이 접속 중이 아니면 ReceiptQueue에 모아 두었다가 로그인할 때 queued=true로 보낸다.
  *
  * 소켓을 모른다. 보내는 일은 Outbox에 부탁한다.
  *
@@ -47,9 +52,14 @@ public class MessageService {
     public static final String BODY_TOO_LARGE = "본문이 너무 깁니다 (1MB 이하).";
     public static final String NO_ATTACHMENT = "첨부파일은 아직 지원하지 않습니다.";
     public static final String SAVE_FAILED = "서버에 저장하지 못했습니다. 잠시 후 다시 보내 주세요.";
+    public static final String STATUS_NOT_FOUND = "메시지를 찾을 수 없습니다.";
+    public static final String STATUS_NOT_SENDER = "보낸 사람만 상태를 볼 수 있습니다.";
+    /** STATUS_OK에서 삭제된 사용자의 상태 표시 (저장되는 상태는 아님, U4). */
+    public static final String DELETED = "DELETED";
 
     private final MessageStore store;
     private final PendingIndex index;
+    private final ReceiptQueue receipts;
     private final UserDirectory users;
     private final Outbox outbox;
     private final ServerEventListener events;
@@ -57,10 +67,11 @@ public class MessageService {
     private final ReentrantReadWriteLock storageLock = new ReentrantReadWriteLock();
     private boolean open; // storageLock 안에서만 읽고 쓴다
 
-    public MessageService(MessageStore store, PendingIndex index, UserDirectory users, Outbox outbox,
-            ServerEventListener events) {
+    public MessageService(MessageStore store, PendingIndex index, ReceiptQueue receipts, UserDirectory users,
+            Outbox outbox, ServerEventListener events) {
         this.store = store;
         this.index = index;
+        this.receipts = receipts;
         this.users = users;
         this.outbox = outbox;
         this.events = events;
@@ -240,12 +251,104 @@ public class MessageService {
             if (update != MessageStore.DeliveryUpdate.NOT_RECIPIENT) {
                 index.remove(userId, messageId);
             }
-            // 5단계: update == CHANGED 이면 보낸 사람에게 RECEIPT(DELIVERED)
+            if (update == MessageStore.DeliveryUpdate.CHANGED) { // 실제로 바뀌었을 때만 알린다 (3.8.5 ③)
+                notifySender(messageId, userId, DeliveryState.DELIVERED, TimeFormat.format(TimeFormat.now()));
+            }
         } catch (IOException e) {
             events.onLog("수신 확인 기록 실패 (" + userId + ", " + messageId + "): " + e.getMessage());
         } finally {
             storageLock.readLock().unlock();
         }
+    }
+
+    // =====================================================================
+    // ④ 읽음 (READ) — 응답 없음
+    // =====================================================================
+
+    /** 받는 사람이 메시지를 읽음. 읽은 시각은 서버가 받은 시각 (U49). 이미 읽었으면 아무것도 바꾸지 않는다. */
+    public void read(String userId, Packet request) {
+        String messageId = request.get(HeaderKeys.MESSAGE_ID);
+        storageLock.readLock().lock();
+        try {
+            if (!open) {
+                return; // 클라이언트는 다음 로그인 때 다시 보낸다 (U49)
+            }
+            String at = TimeFormat.format(TimeFormat.now());
+            MessageStore.ReadUpdate update = store.markRead(messageId, userId, at);
+            if (update != MessageStore.ReadUpdate.NOT_RECIPIENT) {
+                index.remove(userId, messageId); // READ가 ACK보다 먼저 온 경우에도 색인 정리
+            }
+            if (update == MessageStore.ReadUpdate.CHANGED) {
+                notifySender(messageId, userId, DeliveryState.READ, at);
+            }
+        } catch (IOException e) {
+            events.onLog("읽음 기록 실패 (" + userId + ", " + messageId + "): " + e.getMessage());
+        } finally {
+            storageLock.readLock().unlock();
+        }
+    }
+
+    /** 보낸 사람에게 RECEIPT. 접속 중이 아니면(또는 넣지 못하면) 대기 파일에 모아 둔다 (2.6). */
+    private void notifySender(String messageId, String userId, DeliveryState state, String at) throws IOException {
+        StoredMessage m = store.load(messageId);
+        if (m == null || m.getData().getSender() == null) {
+            return;
+        }
+        String sender = m.getData().getSender();
+        if (!outbox.send(sender, receiptPacket(messageId, userId, state, at, false))) {
+            receipts.add(sender, new ReceiptQueue.Receipt(messageId, userId, state, at));
+        }
+    }
+
+    private static Packet receiptPacket(String messageId, String userId, DeliveryState state, String at,
+            boolean queued) {
+        Packet p = new Packet(PacketType.RECEIPT).put(HeaderKeys.MESSAGE_ID, messageId)
+                .put(HeaderKeys.USER_ID, userId).put(HeaderKeys.STATE, state.name()).put(HeaderKeys.AT, at);
+        if (queued) {
+            p.put(HeaderKeys.QUEUED, "true");
+        }
+        return p;
+    }
+
+    // =====================================================================
+    // ⑤ 상태 조회 (STATUS)
+    // =====================================================================
+
+    /** 보낸 사람만 볼 수 있다. 받는 사람·참조마다 SENT/DELIVERED/READ, 삭제된 사용자는 DELETED (2.6, U4). */
+    public Packet status(String userId, Packet request) {
+        String messageId = request.get(HeaderKeys.MESSAGE_ID);
+        StoredMessage m;
+        try {
+            m = store.load(messageId);
+        } catch (IOException e) {
+            events.onLog("상태 조회 실패 (" + messageId + "): " + e.getMessage());
+            m = null;
+        }
+        if (m == null) {
+            return Packet.replyTo(request, PacketType.STATUS_FAIL).put(HeaderKeys.REASON, STATUS_NOT_FOUND);
+        }
+        if (!userId.equals(m.getData().getSender())) {
+            return Packet.replyTo(request, PacketType.STATUS_FAIL).put(HeaderKeys.REASON, STATUS_NOT_SENDER);
+        }
+        Packet reply = Packet.replyTo(request, PacketType.STATUS_OK).put(HeaderKeys.MESSAGE_ID, messageId);
+        for (String id : m.recipients()) {
+            UserAccount account = users.find(id);
+            String state;
+            if (account == null || account.isDeleted()) {
+                state = DELETED;
+            } else if (m.getReadAt(id) != null) {
+                state = DeliveryState.READ.name();
+            } else if (m.isDelivered(id)) {
+                state = DeliveryState.DELIVERED.name();
+            } else {
+                state = DeliveryState.SENT.name();
+            }
+            reply.put(HeaderKeys.STATE_PREFIX + id, state);
+            if (m.getReadAt(id) != null) {
+                reply.put(HeaderKeys.READ_AT_PREFIX + id, m.getReadAt(id));
+            }
+        }
+        return reply;
     }
 
     // =====================================================================
@@ -292,7 +395,41 @@ public class MessageService {
         if (sent > 0) {
             events.onLog("밀린 메시지 " + sent + "개 보냄: " + userId);
         }
+        deliverQueuedReceipts(userId); // 순서: LOGIN_OK → 밀린 MSG → 밀린 RECEIPT (2.6)
         return sent;
+    }
+
+    /** 밀린 RECEIPT를 꺼내 queued=true로 보낸다. 보내다 끊기면 못 보낸 것을 다시 넣는다 (2.6, C4). */
+    private void deliverQueuedReceipts(String userId) {
+        List<ReceiptQueue.Receipt> list;
+        try {
+            list = receipts.drain(userId);
+        } catch (IOException e) {
+            events.onLog("밀린 수신·읽음 알림을 읽지 못했습니다 (" + userId + "): " + e.getMessage());
+            return;
+        }
+        int i = 0;
+        try {
+            for (; i < list.size(); i++) {
+                ReceiptQueue.Receipt r = list.get(i);
+                if (!outbox.sendWhenRoom(userId,
+                        receiptPacket(r.getMessageId(), r.getUserId(), r.getState(), r.getAt(), true))) {
+                    break;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (i < list.size()) {
+            try {
+                receipts.addAll(userId, list.subList(i, list.size()));
+            } catch (IOException e) {
+                events.onLog("밀린 알림을 다시 저장하지 못했습니다 (" + userId + "): " + e.getMessage());
+            }
+        }
+        if (i > 0) {
+            events.onLog("밀린 수신·읽음 알림 " + i + "개 보냄: " + userId);
+        }
     }
 
     // =====================================================================

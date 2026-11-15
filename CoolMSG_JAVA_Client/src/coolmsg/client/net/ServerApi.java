@@ -145,6 +145,23 @@ public class ServerApi {
         connection.send(new Packet(PacketType.ACK).put(HeaderKeys.MESSAGE_ID, messageId));
     }
 
+    /**
+     * 읽음을 알린다 (응답 없음, 2.6). 보내기 대기열에 넣었으면 true.
+     * 연결이 끊겨 false면 다음 로그인 때 다시 보낸다 (U49).
+     */
+    public boolean read(String messageId) {
+        return connection.send(new Packet(PacketType.READ).put(HeaderKeys.MESSAGE_ID, messageId));
+    }
+
+    /**
+     * 보낸 메시지의 받는 사람별 상태 조회 (응답을 기다린다). STATUS_OK 또는 STATUS_FAIL 패킷을 돌려준다.
+     *
+     * @throws IOException 연결이 끊기거나 10초 안에 응답이 없음
+     */
+    public Packet status(String messageId) throws IOException {
+        return await(connection.request(new Packet(PacketType.STATUS).put(HeaderKeys.MESSAGE_ID, messageId)));
+    }
+
     /** 로그아웃을 알린다 (응답 없음). */
     public void logout() {
         connection.send(new Packet(PacketType.LOGOUT));

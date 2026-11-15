@@ -35,6 +35,7 @@ import coolmsg.server.service.LoginService;
 import coolmsg.server.service.MessageService;
 import coolmsg.server.store.MessageStore;
 import coolmsg.server.store.PendingIndex;
+import coolmsg.server.store.ReceiptQueue;
 
 /**
  * 구현 2단계 테스트: 첫 연결 (PING), 접속 받기, 보내기 대기열, 자원 한도.
@@ -86,6 +87,9 @@ final class NetTest {
 
         section.accept("서버 중지·재시작 뒤에도 밀린 메시지 유지 (3.8.6)");
         restartKeepsPending();
+
+        section.accept("구현 5단계 - 접속 상태(PRESENCE)·읽음 알림(RECEIPT) 실제 소켓 (2.5, 2.6)");
+        presenceAndReceipts();
     }
 
     // ===================================================================
@@ -213,6 +217,50 @@ final class NetTest {
                     msg.getType() == PacketType.MSG && "재시작 전에 보냄".equals(msg.getText()));
         } finally {
             second.stop();
+        }
+    }
+
+    private static void presenceAndReceipts() throws Exception {
+        TestServer server = TestServer.start(60_000, SendQueue.DEFAULT_CAPACITY, 10);
+        try (Client kim = loggedIn(server, "kim")) {
+            String id;
+            try (Client lee = loggedIn(server, "lee")) {
+                Packet presence = kim.readAny();
+                check.accept("lee 로그인 → kim에게 PRESENCE(lee, true)",
+                        presence.getType() == PacketType.PRESENCE && "lee".equals(presence.get(HeaderKeys.USER_ID))
+                                && "true".equals(presence.get(HeaderKeys.ONLINE)));
+                check.accept("로그인한 본인에게는 자기 PRESENCE가 오지 않음", lee.readOrNull(200) == null);
+
+                Packet send = sendPacket("lee", "읽음 확인용");
+                id = send.get(HeaderKeys.MESSAGE_ID);
+                kim.send(send.setReqId(2));
+                kim.read(); // SEND_OK
+                Packet msg = lee.read();
+                lee.send(new Packet(PacketType.ACK).put(HeaderKeys.MESSAGE_ID, msg.get(HeaderKeys.MESSAGE_ID)));
+                Packet delivered = kim.readAny();
+                lee.send(new Packet(PacketType.READ).put(HeaderKeys.MESSAGE_ID, id));
+                Packet read = kim.readAny();
+                check.accept("lee의 ACK·READ → kim에게 RECEIPT(DELIVERED) → RECEIPT(READ)",
+                        delivered.getType() == PacketType.RECEIPT && "DELIVERED".equals(delivered.get(HeaderKeys.STATE))
+                                && read.getType() == PacketType.RECEIPT && "READ".equals(read.get(HeaderKeys.STATE)));
+                kim.send(new Packet(PacketType.STATUS).setReqId(3).put(HeaderKeys.MESSAGE_ID, id));
+                Packet status = kim.read();
+                check.accept("STATUS → state.lee=READ", status.getType() == PacketType.STATUS_OK
+                        && "READ".equals(status.get("state.lee")));
+            }
+            Packet off = kim.readAny();
+            check.accept("lee 연결이 닫힘 → kim에게 PRESENCE(lee, false)",
+                    off.getType() == PacketType.PRESENCE && "false".equals(off.get(HeaderKeys.ONLINE)));
+            try (Client lee1 = loggedIn(server, "lee")) {
+                kim.readAny(); // PRESENCE(lee, true)
+                try (Client lee2 = loggedIn(server, "lee")) {
+                    lee1.read(); // BYE
+                    check.accept("같은 아이디가 다른 곳에서 다시 로그인 → 접속 상태 알림 없음 (계속 접속 중)",
+                            kim.readOrNull(300) == null && server.registry.isOnline("lee") && lee2 != null);
+                }
+            }
+        } finally {
+            server.stop();
         }
     }
 
@@ -411,9 +459,9 @@ final class NetTest {
                             && lines.equals(List.of("kim|김철수|true", "lee|이영희|false")));
             check("로그인 목록 알림에 kim", server.lastOnline().equals(List.of("kim")));
 
-            c.send(new Packet(PacketType.STATUS).setReqId(7));
+            c.send(new Packet(PacketType.UPLOAD).setReqId(7));
             Packet status = c.read();
-            check("로그인 후 STATUS → '로그인 필요'가 아니라 '지원하지 않는 기능'(5단계 전)",
+            check("로그인 후 UPLOAD → '로그인 필요'가 아니라 '지원하지 않는 기능'(첨부파일은 제출 범위 밖)",
                     status.getType() == PacketType.ERROR && status.get(HeaderKeys.REASON).contains("지원하지 않는"));
 
             c.send(loginPacket("lee", "pass").setReqId(8));
@@ -511,7 +559,7 @@ final class NetTest {
             this.dataDir = dataDir;
             MessageStore store = new MessageStore(dataDir.resolve("messages"));
             PendingIndex index = new PendingIndex(dataDir.resolve("pending"));
-            messages = new MessageService(store, index, users, registry, this);
+            messages = new MessageService(store, index, new ReceiptQueue(dataDir.resolve("receipts")), users, registry, this);
             RequestDispatcher dispatcher = new RequestDispatcher(new LoginService(ServerConfig.defaults(), users),
                     messages, registry, this);
             listener = new ServerListener(port, dispatcher, registry, this, idleMillis, queueCapacity, maxConnections);
@@ -642,7 +690,18 @@ final class NetTest {
             out.flush();
         }
 
+        /** 다음 패킷. 다른 사람 때문에 끼어드는 PRESENCE·RECEIPT(5단계)는 건너뛴다. */
         Packet read() throws IOException {
+            while (true) {
+                Packet p = reader.read();
+                if (p.getType() != PacketType.PRESENCE && p.getType() != PacketType.RECEIPT) {
+                    return p;
+                }
+            }
+        }
+
+        /** 건너뛰지 않고 그대로 다음 패킷 (5단계 PRESENCE·RECEIPT 검사용). */
+        Packet readAny() throws IOException {
             return reader.read();
         }
 

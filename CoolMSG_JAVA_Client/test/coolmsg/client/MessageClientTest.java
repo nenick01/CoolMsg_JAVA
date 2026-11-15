@@ -56,6 +56,9 @@ final class MessageClientTest {
 
         section.accept("WrapLayout - 작성 창 받는 사람 칸 줄 바꿈 (버그 수정)");
         wrapLayout();
+
+        section.accept("구현 5단계 - 보낸 내역 상태(앞으로만)·읽음 요약·READ 다시 보내기 (2.6, U4, U49)");
+        receiptsAndReads();
     }
 
     // ===================================================================
@@ -192,6 +195,72 @@ final class MessageClientTest {
         check.accept("1MB 초과 (HTML로 바꾼 크기 기준)",
                 ClientController.checkDraft(List.of("lee"), "<".repeat(300_000)) != null);
         check.accept("정상", ClientController.checkDraft(List.of("lee"), "안녕") == null);
+    }
+
+    private static void receiptsAndReads() throws Exception {
+        Path dir = Files.createTempDirectory("coolmsg-receipts");
+        Mailbox box = new Mailbox(dir);
+        MessageData sent = new MessageData(UUID.randomUUID().toString(), List.of("lee", "park"), List.of("choi"),
+                "보냄");
+        sent.setSender("kim");
+        sent.setSentAt(TimeFormat.now());
+        box.saveSent(sent);
+        String id = sent.getMessageId();
+        check.accept("처음에는 모두 전송됨, 요약 0/3", box.sent().get(0).readSummary().equals("0/3")
+                && box.sent().get(0).stateOf("lee") == coolmsg.common.model.DeliveryState.SENT);
+        check.accept("RECEIPT READ → 반영", box.applyReceipt(id, "lee", coolmsg.common.model.DeliveryState.READ,
+                "2026-11-23T15:42:07"));
+        check.accept("늦게 온 DELIVERED·같은 READ → 무시 (앞으로만)",
+                !box.applyReceipt(id, "lee", coolmsg.common.model.DeliveryState.DELIVERED, "2026-11-23T15:40:00")
+                        && !box.applyReceipt(id, "lee", coolmsg.common.model.DeliveryState.READ, "2026-11-23T16:00:00"));
+        MailItem item = box.sent().get(0);
+        check.accept("읽은 시각·요약 1/3", item.readAtText("lee").equals("2026-11-23 15:42")
+                && item.readSummary().equals("1/3"));
+        check.accept("보낸 내역에 없는 메시지의 RECEIPT는 무시",
+                !box.applyReceipt(UUID.randomUUID().toString(), "lee", coolmsg.common.model.DeliveryState.READ, "x"));
+        java.util.Map<String, String> status = new java.util.LinkedHashMap<>();
+        status.put("messageId", id);
+        status.put("state.lee", "READ");
+        status.put("readAt.lee", "2026-11-23T15:42:07");
+        status.put("state.park", "DELETED");
+        status.put("state.choi", "DELIVERED");
+        check.accept("STATUS_OK 반영 → 바뀜", box.applyStatus(id, status));
+        item = box.sent().get(0);
+        check.accept("삭제된 사용자는 분모에서 뺌 (U4): 1/2, choi 안 읽음",
+                item.isDeletedUser("park") && item.readSummary().equals("1/2")
+                        && item.stateOf("choi") == coolmsg.common.model.DeliveryState.DELIVERED);
+        check.accept("같은 STATUS 다시 → 바뀌지 않음", !box.applyStatus(id, status));
+
+        // 받은 메시지: 읽었지만 서버에 못 알림 → 목록에 남음 (U49)
+        MessageData in = received("lee", LocalDateTime.of(2026, 11, 23, 9, 0, 0), "받음");
+        box.saveReceived(in);
+        check.accept("안 읽은 메시지는 다시 보낼 READ 아님", box.unreportedReads().isEmpty());
+        box.markRead(in.getMessageId());
+        check.accept("읽었는데 아직 못 알림 → 다시 보낼 목록에", box.unreportedReads().equals(List.of(in.getMessageId())));
+        box.markReadReported(in.getMessageId());
+        check.accept("알렸다고 기록 → 목록에서 빠짐", box.unreportedReads().isEmpty());
+
+        // 로그인 때 못 알린 READ를 다시 보냄 (가짜 서버)
+        Path base = Files.createTempDirectory("coolmsg-reread");
+        Mailbox leeBox = new Mailbox(base.resolve("lee"));
+        MessageData pending = received("kim", LocalDateTime.of(2026, 11, 23, 10, 0, 0), "못 알린 읽음");
+        leeBox.saveReceived(pending);
+        leeBox.markRead(pending.getMessageId());
+        List<String> seen = Collections.synchronizedList(new ArrayList<>());
+        try (FakeServer server = new FakeServer((in2, out) -> {
+            Packet login = in2.read();
+            out.write(Packet.replyTo(login, PacketType.LOGIN_OK).setText("kim|김철수|true\nlee|이영희|true"));
+            Packet next = in2.read();
+            seen.add(next.getTypeName() + ":" + next.get(HeaderKeys.MESSAGE_ID));
+            in2.read();
+        })) {
+            TestController controller = new TestController(new ClientPaths(base));
+            controller.login(server.address(), "lee", "pass".toCharArray());
+            waitUntil(() -> !seen.isEmpty());
+            check.accept("로그인 성공 직후 못 알린 READ를 다시 보냄 (U49)",
+                    seen.equals(List.of("READ:" + pending.getMessageId())));
+            check.accept("다시 보낸 뒤에는 알렸다고 기록", new Mailbox(base.resolve("lee")).unreportedReads().isEmpty());
+        }
     }
 
     /** 폭이 좁아지면 줄이 늘어나 높이가 커지고, 모든 단추가 폭 안에 들어가는지. */
