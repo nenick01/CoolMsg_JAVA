@@ -4,6 +4,7 @@ bin/
 bin-test/
 out/
 build/
+dist/
 target/
 
 # 패키징

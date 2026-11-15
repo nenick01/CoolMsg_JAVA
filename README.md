@@ -3,7 +3,7 @@
 Java Swing 기반 **클라이언트–서버 구조 사내 메신저**입니다.
 수신자가 접속해 있지 않아도 메시지를 보낼 수 있고, 수신자가 나중에 접속하면 저장된 메시지를 받아 볼 수 있습니다(저장 후 전달, Store-and-Forward).
 
-## 주요 기능 (개발 중)
+## 주요 기능
 
 | 구분 | 기능 | 상태 |
 |---|---|---|
@@ -37,8 +37,8 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 │  │  └─ sample/              예시 users.txt·org.txt (처음 실행 때 config/로 복사됨)
 │  └─ data/                    실행 중 생기는 메시지·첨부파일 — Git 제외
 ├─ CoolMSG_JAVA_Client/        Swing 클라이언트 → Common 참조
-│  ├─ src/
-│  └─ data/                    PC의 보낸 내역·받은 내역 — Git 제외
+│  └─ src/                     (보낸·받은 내역은 사용자 홈 폴더의 .coolmsg/에 저장)
+├─ build.bat                   배포 파일 만들기 (jar, bat, exe 폴더 zip → dist/)
 └─ .vscode/launch.json         VS Code 실행·디버그 설정 (서버, 클라이언트)
 ```
 
@@ -47,18 +47,70 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 
 ## 실행 방법
 
+서버를 먼저 켜고, 클라이언트를 켜서 로그인합니다. 클라이언트는 여러 개 띄울 수 있습니다(같은 PC에서도 가능).
+
+### 1. 바로 실행 — Releases에서 내려받기
+
+저장소 오른쪽 **[Releases](https://github.com/nenick01/CoolMsg_JAVA/releases)**에서 받습니다.
+
+| 파일 | 내용 | 필요한 것 |
+|---|---|---|
+| `CoolMsg-Server-exe.zip` / `CoolMsg-Client-exe.zip` | `CoolMsg-Server.exe` / `CoolMsg-Client.exe` (자바 실행 환경 포함) | 없음 (Windows) |
+| `CoolMsg-Server-jar.zip` / `CoolMsg-Client-jar.zip` | jar + `run-server.bat` / `run-client.bat` | **Java 17 이상** |
+
+1. zip을 원하는 폴더에 풉니다(설치 과정 없음).
+2. 서버: `CoolMsg-Server.exe` 또는 `run-server.bat`을 더블클릭합니다. (명령어: `java -jar CoolMsg-Server.jar`)
+3. 클라이언트: `CoolMsg-Client.exe` 또는 `run-client.bat`을 더블클릭합니다. (명령어: `java -jar CoolMsg-Client.jar`)
+4. 로그인 화면의 서버 칸에 `localhost`(같은 PC) 또는 서버 PC의 IP를 쓰고, 예시 사용자로 로그인합니다(아래 "처음 실행할 때 알아 둘 것").
+
+- 서버의 설정·데이터(`config/`, `data/`)는 **서버 exe·jar가 있는 폴더**에 생깁니다. 서버 폴더째 옮기면 사용자 목록과 메시지도 함께 옮겨집니다.
+
+### 2. 소스에서 빌드해서 실행
+
+**Windows** — 저장소 맨 위 폴더에서:
+
+```
+build.bat          jar·bat·exe 폴더를 모두 만들어 dist\ 에 zip으로 (jpackage 사용, 1분 안팎)
+build.bat jar      exe 없이 jar와 bat만
+```
+
+**명령어로 직접** (JDK 17 이상, 운영체제 상관없음) — 저장소 맨 위 폴더에서:
+
+```
+# 1) 컴파일 (-sourcepath의 경로 구분: Windows는 ;  macOS·Linux는 :)
+javac -encoding UTF-8 -d build/server -sourcepath "CoolMSG_JAVA_Common/src;CoolMSG_JAVA_Server/src" CoolMSG_JAVA_Server/src/coolmsg/server/ServerMain.java
+javac -encoding UTF-8 -d build/client -sourcepath "CoolMSG_JAVA_Common/src;CoolMSG_JAVA_Client/src" CoolMSG_JAVA_Client/src/coolmsg/client/ClientMain.java
+
+# 2) 실행 가능 jar 만들기
+jar --create --file CoolMsg-Server.jar --main-class coolmsg.server.ServerMain -C build/server .
+jar --create --file CoolMsg-Client.jar --main-class coolmsg.client.ClientMain -C build/client .
+
+# 3) 실행 — 서버 jar 옆에 config/가 있어야 예시 사용자로 로그인할 수 있으므로 설정 예시를 함께 복사
+mkdir server-run
+cp CoolMsg-Server.jar server-run/
+cp -r CoolMSG_JAVA_Server/config server-run/
+java -jar server-run/CoolMsg-Server.jar
+java -jar CoolMsg-Client.jar
+```
+
+- Windows 명령 프롬프트에서는 `cp` 대신 `copy`, `cp -r` 대신 `xcopy /e /i`를 씁니다. `build.bat`이 이 과정을 대신해 줍니다.
+
+### 3. IDE에서 실행 (개발용)
+
 - **VS Code**: 저장소 루트 폴더를 열고 `Run and Debug`에서 `Server: ServerMain` 또는 `Client: ClientMain` 선택 후 F5
-  - 서버를 먼저 실행한 뒤 클라이언트를 실행합니다. 클라이언트는 여러 개 띄울 수 있습니다.
-  - 서버는 관리 화면이 열리면 자동으로 접속을 받기 시작합니다(기본 포트 9000). **처음 실행할 때 Windows 방화벽 허용 창**이 뜨면, 다른 PC에서 접속하려면 허용해야 합니다(같은 PC의 `localhost`는 허용하지 않아도 됨).
-  - 클라이언트 로그인 화면의 서버 칸에는 `localhost`(같은 PC) 또는 서버 PC의 IP를 씁니다. 포트를 바꿨다면 `IP:포트`로 씁니다. [연결 테스트]로 접속 가능 여부를 확인할 수 있습니다.
-  - 서버는 관리 화면(GUI)으로 열립니다. 처음 실행하면 관리자 비밀번호를 정하는 창이 뜨고, 이 값은 `CoolMSG_JAVA_Server/config/admin.txt`에 해시로 저장됩니다(Git 제외). 잊으면 그 파일을 지우고 다시 실행하세요.
-  - 처음 실행하면 `config/sample/`의 예시 사용자 목록·조직도가 `config/`로 복사됩니다. 예시 사용자(kim, lee, park, choi)의 테스트 비밀번호는 `CoolMSG_JAVA_Server/config/sample/users.txt` 맨 위 주석에 있습니다.
-  - 관리 화면에서 바꾼 사용자 목록(`config/users.txt`)은 Git에 올라가지 않습니다.
-  - 서버에 저장된 메시지와 미전달 목록은 `CoolMSG_JAVA_Server/data/`(`messages/`, `pending/`)에 있습니다(Git 제외). 서버를 다시 켜도 유지됩니다.
-  - 클라이언트는 로그인에 성공한 서버 주소·아이디를 **사용자 홈 폴더의 `.coolmsg/client.txt`**에 저장합니다(예: `C:\Users\홍길동\.coolmsg\`). 비밀번호는 저장하지 않습니다. 메시지 보관함도 이 폴더의 `{아이디}/`에 생깁니다(받은 메시지 `inbox/`, 보낸 메시지 `sent/`).
-  - 포트·서버 이름 등은 `CoolMSG_JAVA_Server/config/server.txt`에서 바꿉니다(서버를 다시 켜야 반영).
-- **Eclipse**: 저장소 루트를 워크스페이스로 열고 `File → Import → Existing Projects into Workspace`로 세 프로젝트를 모두 가져오기
+- **Eclipse**: 저장소 루트를 워크스페이스로 열고 `File → Import → Existing Projects into Workspace`로 세 프로젝트를 모두 가져온 뒤 `ServerMain`·`ClientMain` → Run As → Java Application
   - Common을 빼고 가져오면 Server·Client에 빌드 오류가 납니다.
+- IDE에서 실행하면 서버의 설정·데이터는 `CoolMSG_JAVA_Server/config/`, `CoolMSG_JAVA_Server/data/`를 씁니다.
+
+### 처음 실행할 때 알아 둘 것
+
+- **관리자 비밀번호**: 서버를 처음 켜면 관리자 비밀번호를 정하는 창이 뜹니다(4자 이상). `config/admin.txt`에 해시로 저장되며, 잊으면 그 파일을 지우고 다시 실행합니다.
+- **예시 사용자**: 처음 실행하면 `config/sample/`의 예시 사용자 목록·조직도가 `config/`로 복사됩니다. 예시 사용자(kim, lee, park, choi)의 테스트 비밀번호는 `config/sample/users.txt` 맨 위 주석에 있습니다. 사용자는 서버 관리 화면의 [사용자 관리]에서 추가합니다(회원가입 없음).
+- **방화벽**: 서버를 처음 켤 때 Windows 방화벽 허용 창이 뜨면, 다른 PC에서 접속하려면 허용해야 합니다(같은 PC의 `localhost`는 허용하지 않아도 됨).
+- **서버 주소**: 로그인 화면의 서버 칸에는 `localhost` 또는 서버 PC의 IP를 씁니다. 포트를 바꿨다면 `IP:포트`. [연결 테스트]로 접속 가능 여부를 확인할 수 있습니다.
+- **포트·서버 이름**: `config/server.txt`에서 바꿉니다(서버를 다시 켜야 반영, 기본 포트 9000).
+- **저장 위치**: 서버의 메시지와 미전달 목록은 `data/`(`messages/`, `pending/`, `receipts/`). 클라이언트는 서버 주소·아이디와 보관함을 **사용자 홈 폴더의 `.coolmsg/`**에 저장합니다(예: `C:\Users\홍길동\.coolmsg\`). 비밀번호는 저장하지 않습니다.
+- 운영 데이터(`users.txt`, `org.txt`, `admin.txt`, `data/`)는 Git에 올라가지 않습니다.
 
 ## 테스트
 
@@ -78,6 +130,7 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 
 ## 개발 환경
 
-- Java, Swing
-- TCP 소켓 통신
+- Java 17 (JDK), Swing — 외부 라이브러리 없음
+- TCP 소켓 통신 (직접 정의한 응용 계층 프로토콜, 설계서 2장)
 - VS Code / Eclipse
+- 배포: `jar`, `jpackage` (JDK 기본 도구)

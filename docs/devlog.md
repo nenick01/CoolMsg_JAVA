@@ -862,7 +862,7 @@
 
 ### 다음 할 일
 - [x] 서버가 실행 파일 위치를 기준으로 `config/`·`data/`를 찾도록 수정 (U63) → (19)
-- [ ] jar·bat·jpackage zip을 만드는 빌드 스크립트, README 실행 방법
+- [x] jar·bat·jpackage zip을 만드는 빌드 스크립트, README 실행 방법 → (20)
 - [ ] 발표자료(실행 화면 캡처 필요), 결과보고서
 
 ## 2026-11-16 (19) — 서버 기준 폴더 (U63)
@@ -870,4 +870,22 @@
 - `AppHome`: exe(jpackage)로 실행하면 exe 폴더, jar로 실행하면 jar 폴더, IDE에서는 작업 폴더. `ServerMain`이 이 아래의 `config/`·`data/`를 쓰고, 관리 화면 로그에 실제 위치를 보여 준다.
 - **jpackage의 함정**: exe로 실행해도 jar는 exe 옆이 아니라 `app/` 폴더 안에 있다. jar 위치만 보면 `app/config/`가 생긴다. jpackage 실행기가 넣어 주는 `jpackage.app-path`(exe 경로)를 먼저 본다.
 - 확인: 규칙 검사 4개(서버 210 통과) + `AppHome`을 넣은 jar를 다른 폴더에서 `java -jar`로 실행해 jar 폴더가 잡히는 것을 확인.
+
+## 2026-11-16 (20) — 배포 파일 `build.bat`, README 실행 방법
+
+- `build.bat` 한 번으로 `dist\`에 zip 4개: 서버·클라이언트 각각 jar 묶음(jar + bat + 서버는 `config/` 예시)과 exe 묶음(jpackage 앱 폴더, 자바 포함). `build.bat jar`는 exe 없이.
+- README 실행 방법을 세 갈래로: ① Releases에서 받아 바로 실행 ② 소스에서 빌드(`build.bat` 또는 운영체제 상관없는 `javac`·`jar`·`java` 명령) ③ IDE. 처음 실행할 때 알아 둘 것(관리자 비밀번호, 예시 사용자, 방화벽, 저장 위치)을 따로 모음. 낡은 내용(클라이언트 `data/`, "개발 중")도 고침.
+
+### 막혔던 것
+- **한글 경로에서 bat 실행**: Git Bash에서 `cmd //c build.bat`, PowerShell에서 `Set-Location` 뒤 `cmd /c build.bat` 모두 "인식할 수 없는 명령". `.\build.bat`처럼 현재 폴더를 명시하니 실행됐다.
+- **zip에서 jar가 빠졌는데 "완료"**: PowerShell `Compress-Archive`가 방금 만든 jar를 열지 못했고(백신 검사 중 잠금으로 보임), 그 오류가 스크립트를 멈추지 않았다. zip을 JDK의 `jar -c -M`으로 만들어 해결 — JDK만 있으면 되는 장점도 있다.
+- **bat 파일 인코딩**: cp949로 저장하면 명령 창은 괜찮지만 GitHub에서 한글이 깨진다. UTF-8로 저장하고 맨 앞에서 `chcp 65001`.
+
+### 배운 점
+- **"완료" 메시지를 믿지 말고 결과물을 연다.** zip 크기(245바이트)와 내용을 열어 보고서야 jar가 빠진 것을 알았다. 빌드 스크립트는 단계마다 실패하면 멈추게 하고(`|| exit /b 1`), 결과물을 직접 검사해야 한다.
+- **README는 직접 따라 해 본다.** 깨끗한 복사본(`git archive`)에서 README 명령을 그대로 실행해, 개발 PC에만 있는 파일에 기대고 있지 않은지 확인했다.
+
+### 다음 할 일
+- [ ] GitHub Releases에 `v1.0.0`으로 zip 4개 올리기
+- [ ] 발표자료(실행 화면 캡처), 결과보고서
 
