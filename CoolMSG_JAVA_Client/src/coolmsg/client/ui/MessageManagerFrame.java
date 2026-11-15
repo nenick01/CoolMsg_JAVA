@@ -2,18 +2,20 @@ package coolmsg.client.ui;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JEditorPane;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
@@ -23,61 +25,86 @@ import javax.swing.table.DefaultTableCellRenderer;
 import coolmsg.client.ClientController;
 import coolmsg.client.model.MailItem;
 import coolmsg.common.model.HtmlText;
+import coolmsg.common.model.MessageData;
 
 /**
- * 메시지 관리함: [받은 메시지] / [보낸 메시지] 탭이 있는 별도 창 (설계서 4.3, 5장 U39·U42).
+ * 메시지 관리함: [받은 메시지] / [보낸 메시지] 탭, 왼쪽 목록 + 오른쪽 본문 (설계서 4.3, 5장 U39·U42·U48).
  *
- * - 최신이 위. 안 읽은 받은 메시지는 굵게.
- * - 받은 메시지: 보낸 사람 | 날짜·시간 | 내용 미리보기(30자)
- * - 보낸 메시지: 받는 사람("이영희 외 2명") | 날짜·시간 | 내용 미리보기 (읽음 요약은 5단계)
- * - [열기](두 번 누르기도 같음), [삭제](확인 창). 삭제는 내 PC 보관함에서만.
- * 목록 내용은 컨트롤러가 refresh()로 다시 채운다. Swing 스레드에서만 쓴다.
+ * - 왼쪽 목록: 최신이 위, 안 읽은 받은 메시지는 굵게.
+ *   받은 메시지: 보낸 사람 | 날짜·시간 | 내용 미리보기(30자) / 보낸 메시지: 받는 사람("이영희 외 2명") | 날짜·시간 | 내용
+ * - 줄을 고르면 오른쪽에 머리글(보낸 사람, 받는 사람, 참조, 보낸 시각)과 본문. 별도 보기 창은 없다(U48).
+ * - 받은 메시지는 고르는 즉시 읽음 (5단계에서 이때 READ).
+ * - 아래 단추: [삭제](확인 창, 내 PC에서만) [닫기]. 회신·전달은 7단계.
+ * 목록은 컨트롤러가 refresh()로 다시 채운다. Swing 스레드에서만 쓴다.
  */
 public class MessageManagerFrame extends JFrame {
 
     private static final long serialVersionUID = 1L;
 
     public static final int PREVIEW_CHARS = 30;
+    private static final String EMPTY_HTML =
+            "<html><body style='font-family:sans-serif; color:#888888; padding:16px'>"
+                    + "메시지를 고르면 여기에 내용이 보입니다.</body></html>";
 
     private final ClientController controller;
     private final JTabbedPane tabs = new JTabbedPane();
-    private final MailTableModel inboxModel;
-    private final MailTableModel sentModel;
+    private final MailTableModel inboxModel = new MailTableModel(true);
+    private final MailTableModel sentModel = new MailTableModel(false);
     private final JTable inboxTable;
     private final JTable sentTable;
+    private final JEditorPane detail = new JEditorPane("text/html", EMPTY_HTML);
+    private final JButton deleteButton = new JButton("삭제");
+    /** 오른쪽에 지금 보여 주는 메시지 ID (같은 메시지면 다시 그리지 않아 스크롤 위치를 지킨다). */
+    private String shownId;
+    /** 목록을 다시 채우는 중 (그동안 선택이 잠깐 풀리는 이벤트는 무시한다 — 읽던 본문의 스크롤이 튀지 않게). */
+    private boolean reloading;
 
     public MessageManagerFrame(ClientController controller) {
         super("메시지 관리함");
         this.controller = controller;
 
-        inboxModel = new MailTableModel(true);
-        sentModel = new MailTableModel(false);
         inboxTable = createTable(inboxModel);
         sentTable = createTable(sentModel);
         tabs.addTab("받은 메시지", new JScrollPane(inboxTable));
         tabs.addTab("보낸 메시지", new JScrollPane(sentTable));
+        tabs.addChangeListener(e -> showSelected());
 
-        JButton open = new JButton("열기");
-        JButton delete = new JButton("삭제");
-        open.addActionListener(e -> openSelected());
-        delete.addActionListener(e -> deleteSelected());
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        buttons.add(open);
-        buttons.add(delete);
+        detail.setEditable(false);
+        JScrollPane detailScroll = new JScrollPane(detail);
+        detailScroll.setMinimumSize(new Dimension(260, 200));
+        tabs.setMinimumSize(new Dimension(300, 200));
+
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, tabs, detailScroll);
+        split.setResizeWeight(0.45); // 창을 키우면 오른쪽(본문)이 조금 더 커진다
+        split.setDividerLocation(430);
+        split.setBorder(BorderFactory.createEmptyBorder(6, 6, 0, 6));
+
+        JButton close = new JButton("닫기");
+        deleteButton.addActionListener(e -> deleteSelected());
+        close.addActionListener(e -> dispose());
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        buttons.add(deleteButton);
+        buttons.add(close);
 
         setLayout(new BorderLayout());
-        add(tabs, BorderLayout.CENTER);
+        add(split, BorderLayout.CENTER);
         add(buttons, BorderLayout.SOUTH);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-        setSize(640, 420);
+        setSize(960, 580);
+        setMinimumSize(new Dimension(640, 360));
         setLocationByPlatform(true);
         refresh();
     }
 
     /** 보관함에서 목록을 다시 읽는다. 고른 줄은 같은 메시지면 유지한다. */
     public void refresh() {
-        reload(inboxTable, inboxModel, controller.mailbox().inbox());
-        reload(sentTable, sentModel, controller.mailbox().sent());
+        reloading = true;
+        try {
+            reload(inboxTable, inboxModel, controller.mailbox().inbox());
+            reload(sentTable, sentModel, controller.mailbox().sent());
+        } finally {
+            reloading = false;
+        }
         int unread = 0;
         for (MailItem m : inboxModel.items) {
             if (!m.isRead()) {
@@ -85,11 +112,25 @@ public class MessageManagerFrame extends JFrame {
             }
         }
         tabs.setTitleAt(0, unread > 0 ? "받은 메시지 (" + unread + ")" : "받은 메시지");
+        setTitle("메시지 관리함 (받은 메시지 " + inboxModel.items.size() + "개, 안 읽음 " + unread + "개)");
+        showSelected();
     }
 
     /** 받은 메시지 탭(true) 또는 보낸 메시지 탭을 보여 준다. */
     public void showTab(boolean inbox) {
         tabs.setSelectedIndex(inbox ? 0 : 1);
+    }
+
+    /** 그 메시지 줄을 고른다 (알림 창을 눌렀을 때). 받은 메시지면 읽음이 된다. */
+    public void select(String messageId, boolean inbox) {
+        showTab(inbox);
+        JTable table = inbox ? inboxTable : sentTable;
+        MailTableModel model = inbox ? inboxModel : sentModel;
+        int row = model.indexOf(messageId);
+        if (row >= 0) {
+            table.setRowSelectionInterval(row, row);
+            table.scrollRectToVisible(table.getCellRect(row, 0, true));
+        }
     }
 
     // =====================================================================
@@ -105,11 +146,47 @@ public class MessageManagerFrame extends JFrame {
         return row < 0 ? null : model.items.get(table.convertRowIndexToModel(row));
     }
 
-    private void openSelected() {
+    /** 고른 줄의 내용을 오른쪽에 보여 준다. 안 읽은 받은 메시지면 읽음으로 표시한다(U48). */
+    private void showSelected() {
         MailItem item = selectedItem();
-        if (item != null) {
-            controller.openMessage(item, inboxSelected());
+        deleteButton.setEnabled(item != null);
+        if (item == null) {
+            if (shownId != null) {
+                shownId = null;
+                detail.setText(EMPTY_HTML);
+            }
+            return;
         }
+        if (!item.getMessageId().equals(shownId)) {
+            shownId = item.getMessageId();
+            detail.setText(toHtml(item.getData()));
+            detail.setCaretPosition(0); // 맨 위부터
+        }
+        if (inboxSelected() && !item.isRead()) {
+            controller.markRead(item.getMessageId()); // → 컨트롤러가 refresh()를 부른다
+        }
+    }
+
+    /** 오른쪽 영역 HTML: 머리글 표 + 본문. 이름은 특수 문자를 바꿔 넣는다(본문만 HTML). */
+    private String toHtml(MessageData d) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<html><body style='font-family:sans-serif; margin:0'>");
+        sb.append("<table width='100%' cellpadding='4' cellspacing='0' bgcolor='#F3F6FA'>");
+        row(sb, "보낸 사람", controller.nameWithId(d.getSender()));
+        row(sb, "받는 사람", controller.namesWithIds(d.getReceivers()));
+        if (!d.getCc().isEmpty()) {
+            row(sb, "참조", controller.namesWithIds(d.getCc()));
+        }
+        row(sb, "보낸 시각", d.getSentAt() == null ? "" : MailItem.LIST_TIME.format(d.getSentAt()));
+        sb.append("</table><hr>");
+        sb.append("<div style='padding:6px'>").append(d.getBody()).append("</div>");
+        sb.append("</body></html>");
+        return sb.toString();
+    }
+
+    private static void row(StringBuilder sb, String label, String value) {
+        sb.append("<tr><td width='70' valign='top'><b>").append(label).append("</b></td><td>")
+                .append(HtmlText.fromPlain(value)).append("</td></tr>");
     }
 
     private void deleteSelected() {
@@ -118,11 +195,19 @@ public class MessageManagerFrame extends JFrame {
             return;
         }
         boolean inbox = inboxSelected();
+        JTable table = inbox ? inboxTable : sentTable;
+        int row = table.getSelectedRow();
         int answer = JOptionPane.showConfirmDialog(this,
                 "이 메시지를 지울까요?\n내 PC의 보관함에서만 지워지며, 되돌릴 수 없습니다.",
                 "메시지 삭제", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (answer == JOptionPane.YES_OPTION) {
-            controller.deleteMessage(item.getMessageId(), inbox);
+        if (answer != JOptionPane.YES_OPTION) {
+            return;
+        }
+        controller.deleteMessage(item.getMessageId(), inbox); // → refresh()
+        int count = table.getRowCount();
+        if (count > 0) { // 바로 아래 줄(없으면 위 줄)을 고른다
+            int next = Math.min(row, count - 1);
+            table.setRowSelectionInterval(next, next);
         }
     }
 
@@ -130,10 +215,11 @@ public class MessageManagerFrame extends JFrame {
         JTable table = new JTable(model);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         table.setFillsViewportHeight(true);
+        table.setRowHeight(table.getRowHeight() + 6);
         table.getTableHeader().setReorderingAllowed(false);
-        table.getColumnModel().getColumn(0).setPreferredWidth(140);
-        table.getColumnModel().getColumn(1).setPreferredWidth(130);
-        table.getColumnModel().getColumn(2).setPreferredWidth(340);
+        table.getColumnModel().getColumn(0).setPreferredWidth(110);
+        table.getColumnModel().getColumn(1).setPreferredWidth(125);
+        table.getColumnModel().getColumn(2).setPreferredWidth(180);
         table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
             private static final long serialVersionUID = 1L;
 
@@ -146,12 +232,9 @@ public class MessageManagerFrame extends JFrame {
                 return c;
             }
         });
-        table.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2 && table.getSelectedRow() >= 0) {
-                    openSelected();
-                }
+        table.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting() && !reloading) {
+                showSelected();
             }
         });
         return table;
@@ -161,13 +244,9 @@ public class MessageManagerFrame extends JFrame {
         int row = table.getSelectedRow();
         String selectedId = row < 0 ? null : model.items.get(table.convertRowIndexToModel(row)).getMessageId();
         model.setItems(items);
-        if (selectedId != null) {
-            for (int i = 0; i < items.size(); i++) {
-                if (items.get(i).getMessageId().equals(selectedId)) {
-                    table.setRowSelectionInterval(i, i);
-                    break;
-                }
-            }
+        int again = selectedId == null ? -1 : model.indexOf(selectedId);
+        if (again >= 0) {
+            table.setRowSelectionInterval(again, again);
         }
     }
 
@@ -185,6 +264,15 @@ public class MessageManagerFrame extends JFrame {
         void setItems(List<MailItem> newItems) {
             items = new ArrayList<>(newItems);
             fireTableDataChanged();
+        }
+
+        int indexOf(String messageId) {
+            for (int i = 0; i < items.size(); i++) {
+                if (items.get(i).getMessageId().equals(messageId)) {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         @Override

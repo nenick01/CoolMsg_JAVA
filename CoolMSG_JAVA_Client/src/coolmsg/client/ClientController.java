@@ -10,7 +10,6 @@ import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
-import coolmsg.client.model.MailItem;
 import coolmsg.client.model.UserEntry;
 import coolmsg.client.net.Connection;
 import coolmsg.client.net.ConnectionTester;
@@ -24,7 +23,6 @@ import coolmsg.client.ui.ComposeFrame;
 import coolmsg.client.ui.LoginFrame;
 import coolmsg.client.ui.MainFrame;
 import coolmsg.client.ui.MessageManagerFrame;
-import coolmsg.client.ui.MessageViewFrame;
 import coolmsg.client.ui.Toast;
 import coolmsg.common.FormatException;
 import coolmsg.common.ProtocolInfo;
@@ -271,14 +269,11 @@ public class ClientController implements Connection.Listener {
         }
     }
 
-    /** 알림 창을 눌렀을 때(1개): 받은 메시지 탭을 열고 그 메시지 보기 창도 연다. */
+    /** 알림 창을 눌렀을 때(1개): 받은 메시지 탭을 열고 그 메시지 줄을 고른다 (U48). */
     private void openReceived(String messageId) {
         openManager(true);
-        for (MailItem m : mailbox.inbox()) {
-            if (m.getMessageId().equals(messageId)) {
-                openMessage(m, true);
-                return;
-            }
+        if (managerFrame != null) {
+            managerFrame.select(messageId, true);
         }
     }
 
@@ -364,19 +359,18 @@ public class ClientController implements Connection.Listener {
         managerFrame.toFront();
     }
 
-    /** 메시지 보기 창. 받은 메시지를 열면 읽음으로 표시한다 (READ 전송은 5단계). */
-    public void openMessage(MailItem item, boolean inbox) {
-        if (inbox && !item.isRead()) {
-            try {
-                mailbox.markRead(item.getMessageId());
-            } catch (IOException e) {
-                System.err.println("읽음 표시를 저장하지 못했습니다: " + e.getMessage());
-            }
-            refreshViews();
+    /** 받은 메시지를 읽음으로 표시한다 (관리함에서 줄을 골랐을 때, U48). 5단계에서는 여기서 READ를 한 번만 보낸다. */
+    public void markRead(String messageId) {
+        Mailbox box = mailbox;
+        if (box == null) {
+            return;
         }
-        MessageViewFrame f = new MessageViewFrame(this, item, inbox);
-        track(f);
-        f.setVisible(true);
+        try {
+            box.markRead(messageId);
+        } catch (IOException e) {
+            System.err.println("읽음 표시를 저장하지 못했습니다: " + e.getMessage());
+        }
+        refreshViews();
     }
 
     /** 내 PC 보관함에서 지운다. 받은 메시지는 다시 받아도 되살아나지 않게 ID를 남긴다(U38). */
