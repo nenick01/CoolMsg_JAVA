@@ -12,6 +12,15 @@
         },
         {
             "type": "java",
+            "name": "Test: Common",
+            "request": "launch",
+            "mainClass": "coolmsg.common.CommonTest",
+            "projectName": "CoolMSG_JAVA_Common",
+            "cwd": "${workspaceFolder}/CoolMSG_JAVA_Common",
+            "vmArgs": "-Dfile.encoding=UTF-8"
+        },
+        {
+            "type": "java",
             "name": "Client: MyFrame",
             "request": "launch",
             "mainClass": "MyFrame",

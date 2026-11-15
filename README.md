@@ -47,6 +47,12 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 - **Eclipse**: 저장소 루트를 워크스페이스로 열고 `File → Import → Existing Projects into Workspace`로 세 프로젝트를 모두 가져오기
   - Common을 빼고 가져오면 Server·Client에 빌드 오류가 납니다.
 
+## 테스트
+
+- VS Code: `Run and Debug`에서 `Test: Common` 선택 후 F5
+- Eclipse: `CoolMSG_JAVA_Common/test/coolmsg/common/CommonTest.java` → Run As → Java Application
+- 결과는 줄마다 `PASS`/`FAIL`로 나오고, 마지막 줄에 통과·실패 개수가 나옵니다. 기록은 [테스트 기록](docs/04_테스트기록.md)에 있습니다.
+
 ## 문서
 
 | 문서 | 내용 |
@@ -54,6 +60,7 @@ CoolMsg_JAVA/                  (Eclipse 워크스페이스 겸 VS Code 작업 �
 | [제안서](docs/01_제안서.md) | 기획 의도, 아키텍처 선택 근거, 일정 |
 | [요구사항분석서](docs/02_요구사항분석서.md) | 기능·비기능 요구사항, 사용 시나리오 |
 | [설계서](docs/03_설계서.md) | 시스템 구성, 통신 프로토콜, 클래스 설계 |
+| [테스트 기록](docs/04_테스트기록.md) | 정상 동작과 오류·예외 처리 확인 결과 |
 | [개발 일지](docs/devlog.md) | 날짜별 진행 상황과 문제 해결 기록 |
 
 ## 개발 환경

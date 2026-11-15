@@ -1,6 +1,7 @@
 # 컴파일 결과물
 *.class
 bin/
+bin-test/
 out/
 build/
 target/

@@ -339,3 +339,54 @@
 - [ ] 설계·클래스 구조 이해 (설계서 1.2, 3.1, 3.6, 4.1 읽기) 후 개발 시작
 - [ ] Common 구현 (`PacketType`, `Packet`, `PacketReader`/`PacketWriter` 일반 메서드, `HeaderBodyFile`, `AtomicFile`, `TimeFormat`)
 - [ ] 서버 구현 (`ServerContext`, `UserDirectory`, 사용자 관리 CRUD)
+
+## 2026-11-13 (5)
+
+### 한 일
+- 설계 확정본을 커밋하고 GitHub에 올렸다 (`4c1932d`).
+- **Common 구현** (설계서 1.2)
+  - `coolmsg.common`: `ProtocolInfo`(시간·크기 제한 상수 추가), `FormatException`
+  - `coolmsg.common.net`: `PacketType`, `Packet`, `PacketReader`, `PacketWriter`, `ProgressListener`
+  - `coolmsg.common.file`: `HeaderFormat`, `HeaderBodyFile`, `AtomicFile`, `TimeFormat`
+  - `coolmsg.common.model`: `MessageData`, `AttachmentInfo`, `DeliveryState`
+  - 첨부파일 전송 메서드(`readFileTo`, `writeFile`)는 뼈대만 두었다 (설계서 1.3).
+- **테스트**: `CommonTest` 71개 통과. 결과를 [테스트 기록](04_테스트기록.md)에 정리했다.
+  - 앞서 설명한 SEND 예시 패킷이 실제로 **206바이트**(헤더 134 + 데이터 64 + 길이 8)로 나오는 것까지 확인했다.
+
+### 결정 사항 (설계서 5장에 추가)
+- **U11 엄격한 헤더 규칙은 프로그램이 쓰는 데이터에만.** 커밋할 때 본 `LF will be replaced by CRLF` 경고처럼, Git은 Windows에서 텍스트 파일을 `\r\n` 줄바꿈으로 내려받는다. 사람이 고치는 설정 파일에까지 "`\r`이 있으면 오류" 규칙을 쓰면, 저장소에서 받은 설정 파일을 서버가 읽지 못한다. 설정 파일은 줄 끝 `\r`과 공백을 허용한다.
+- **U12 형식 오류는 `FormatException` 하나로.** `IOException`의 하위 클래스라서 파일·통신 오류와 같은 방식으로 처리된다.
+- **U13 테스트는 JUnit 없이 `test/` 폴더의 `main` 클래스로.** 외부 라이브러리 제약을 지키면서 과제의 "테스트 기록"을 남긴다.
+
+### 구현하면서 배운 점
+- `new String(bytes, UTF_8)`은 깨진 UTF-8을 `?`로 **조용히 바꿔 버린다.** 오류를 숨기지 않으려고 `CharsetDecoder`에 `REPORT`를 걸어 형식 오류로 처리했다.
+- `DateTimeFormatter`에서 `yyyy`는 "연호 기준 연도"라서 엄격 모드(`STRICT`)에서는 읽기가 실패한다. `uuuu`를 써야 하고, 엄격 모드여야 2월 30일 같은 없는 날짜를 3월 2일로 바꾸지 않고 오류로 본다.
+- 모르는 종류의 패킷은 예외로 처리하지 않고 그대로 돌려준다. 그래야 서버가 연결을 끊지 않고 `ERROR`로 응답할 수 있다. 반면 길이가 틀린 패킷은 이후 바이트 위치가 모두 어긋나므로 연결을 닫아야 한다. 두 경우를 구분하는 것이 핵심이었다.
+
+### 다음 할 일
+- [ ] 서버 구현: `ServerConfig`(server.txt), `UserDirectory`(UserStore 대체, 5칸 형식), `ServerContext`
+- [ ] 관리 화면 [사용자 관리] 추가·수정·비밀번호 초기화·삭제
+
+## 2026-11-15
+
+### 한 일
+- VS Code에서 Common 테스트를 실행·디버그할 수 있게 빌드 설정을 고쳤다.
+- 디버거로 `CommonTest.packetReadWrite()`의 `write(send)`를 따라가며 `Packet` → `PacketWriter` → 206바이트 변환 흐름을 확인했다.
+
+### 문제와 해결
+- **문제: VS Code의 Run/Debug 버튼을 누르면 "Build failed" 알림이 뜨고 `CommonTest`를 찾지 못함**
+  - 오류 메시지: `Test source folder 'test' in project 'CoolMSG_JAVA_Common' must have a separate output folder`
+  - 원인: `test` 폴더를 "테스트 소스"로 표시하면서 컴파일 결과를 `src`와 같은 `bin`에 넣도록 두었다. VS Code Java(Eclipse 규칙)는 테스트 코드와 실제 코드의 결과물을 다른 폴더에 두도록 강제한다.
+  - Common 빌드가 막히자 Common을 참조하는 Server·Client도 "의존 프로젝트에 오류가 있어 빌드하지 않음"으로 함께 실패했다. 오류 4개 중 원인은 1개였다.
+  - 해결: `.classpath`에서 `test` 폴더의 출력 폴더를 `bin-test`로 따로 지정하고, `.gitignore`에 `bin-test/` 추가 → Problems 패널 오류 0개, `bin-test`에 `CommonTest.class` 생성 확인
+  - 배운 점: 여러 오류가 한꺼번에 뜨면 "다른 오류 때문에 생긴 오류"를 걸러 내고 **원인이 되는 하나**를 찾는다.
+
+### 생각해 본 것 (설계 이해)
+- `switch`와 enum: enum을 쓴다고 자동으로 `switch`가 되는 것은 아니다. enum으로 `switch`하면 오타와 처리 누락을 컴파일러가 잡아 준다. 여기서 `if-else`와의 속도 차이는 네트워크 지연(밀리초)에 비해 무시할 만하다.
+- 시간 복잡도: 패킷 해석은 O(패킷 크기), 헤더에서 키로 찾기는 O(1)(`HashMap`), 종류별 분기는 O(1). 실제 비용은 처리 함수 안에서 생긴다. 특히 로그인 때 밀린 메시지를 찾으려면 메시지 파일을 모두 훑어야 해서 O(전체 메시지 수)가 된다.
+- 색인: 메시지를 쌓을 때 사용자별 목록(`pending/{아이디}.txt`)도 같이 갱신하면, 로그인 때 내 목록만 읽으면 된다(쓰기 비용을 조금 늘려 읽기를 빠르게). 이미 설계한 `receipts/{아이디}.txt`와 같은 구조라서 텍스트 파일로도 가능하다. → 서버 `MessageStore` 구현 때 결정하기로 함
+- DBMS를 쓰지 않은 이유: 과제가 파일 입출력을 요구하고, 외부 jar는 "README만 보고 실행" 조건에서 실패 위험이 있다. 대신 DB가 해 주던 일(트랜잭션 → `AtomicFile`, 행 잠금 → 메시지 ID별 잠금, 인덱스 → 사용자별 대기 파일)을 직접 구현하며 그 필요성을 체감하는 프로젝트가 되었다.
+
+### 다음 할 일
+- [ ] 서버 구현: `ServerConfig`, `UserDirectory`, `ServerContext`, [사용자 관리] CRUD
+- [ ] `MessageStore` 구현 전에 사용자별 미전달 색인(`pending/`) 도입 여부 결정
