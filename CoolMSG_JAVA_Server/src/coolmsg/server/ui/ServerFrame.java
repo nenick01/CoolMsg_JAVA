@@ -81,6 +81,7 @@ public class ServerFrame extends JFrame {
         setLocationRelativeTo(null); // 화면 가운데
 
         statusPanel.log("관리자 로그인 완료. 서버 관리 화면을 시작합니다.");
+        statusPanel.log("설정·데이터 폴더: " + context.getConfigDir().toAbsolutePath().getParent()); // U63
         for (String warning : context.getStartupWarnings()) {
             statusPanel.log("경고: " + warning);
         }

@@ -2,7 +2,6 @@ package coolmsg.server;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
@@ -19,14 +18,17 @@ import coolmsg.server.ui.ServerFrame;
  * 2. ServerContext 생성 (운영 파일이 없으면 예시 복사, server.txt·users.txt 읽기)
  * 3. 서버 관리 화면(ServerFrame) 표시 → 접속 받기 자동 시작
  *
- * 작업 폴더는 CoolMSG_JAVA_Server 프로젝트 폴더여야 config/ 경로를 찾는다.
- * (Eclipse 기본값, VS Code는 launch.json의 cwd 설정)
+ * config/·data/는 기준 폴더(AppHome, U63) 아래에 둔다:
+ *   jar·exe로 실행하면 그 파일이 있는 폴더, IDE에서 실행하면 작업 폴더(CoolMSG_JAVA_Server 프로젝트 폴더 —
+ *   Eclipse 기본값, VS Code는 launch.json의 cwd 설정).
  */
 public class ServerMain {
 
-    private static final Path CONFIG_DIR = Paths.get("config");
+    /** 기준 폴더 (U63): jar·exe가 있는 폴더, IDE에서는 작업 폴더. */
+    private static final Path HOME = AppHome.resolve();
+    private static final Path CONFIG_DIR = HOME.resolve("config");
     /** 메시지·미전달 색인 저장 위치 (설계서 3.2). git에 올리지 않는다(.gitignore). */
-    private static final Path DATA_DIR = Paths.get("data");
+    private static final Path DATA_DIR = HOME.resolve("data");
 
     public static void main(String[] args) {
         // Swing 화면은 Swing 전용 스레드(이벤트 디스패치 스레드)에서 만들어야 한다.

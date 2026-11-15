@@ -38,6 +38,7 @@ public class ServerTest {
         userDirectoryConcurrency();
         serverContext();
         sampleCopy();
+        appHome();
         NetTest.run(ServerTest::check, ServerTest::section);
         MessageTest.run(ServerTest::check, ServerTest::section);
         OrgTest.run(ServerTest::check, ServerTest::section);
@@ -267,6 +268,25 @@ public class ServerTest {
         reloaded.load();
         check("스레드 4개 × 5명 동시 추가 → 오류 없이 메모리 22명", errors.isEmpty() && d.getUsers().size() == 22);
         check("파일에도 22명 모두 저장 (덮어쓰기로 사라진 사람 없음)", reloaded.getUsers().size() == 22);
+    }
+
+    // ===================================================================
+    // AppHome (U63)
+    // ===================================================================
+    private static void appHome() throws Exception {
+        section("AppHome - 서버 기준 폴더 (U63)");
+        Path work = Files.createTempDirectory("coolmsg-work");
+        Path release = Files.createTempDirectory("coolmsg-release");
+        Path jar = Files.createFile(release.resolve("CoolMsg-Server.jar"));
+        Path exeDir = Files.createTempDirectory("coolmsg-exe");
+        Path appJar = Files.createDirectories(exeDir.resolve("app")).resolve("CoolMsg-Server.jar");
+        check("jpackage exe로 실행 → exe가 있는 폴더 (jar가 있는 app/ 아님)",
+                AppHome.resolve(exeDir.resolve("CoolMsgServer.exe").toString(), appJar, work).equals(exeDir.toAbsolutePath()));
+        check("java -jar 로 실행 → jar가 있는 폴더 (작업 폴더와 상관없이)",
+                AppHome.resolve(null, jar, work).equals(release.toAbsolutePath()));
+        check("IDE에서 클래스 폴더로 실행 → 작업 폴더",
+                AppHome.resolve(null, Files.createTempDirectory("coolmsg-bin"), work).equals(work));
+        check("알 수 없으면 작업 폴더", AppHome.resolve(null, null, work).equals(work) && AppHome.resolve("", null, work).equals(work));
     }
 
     // ===================================================================

@@ -861,7 +861,13 @@
 - 양식 파일은 `.gitignore`(`*.hwpx`)로 저장소에 올리지 않는다.
 
 ### 다음 할 일
-- [ ] 서버가 실행 파일 위치를 기준으로 `config/`·`data/`를 찾도록 수정 (U63)
+- [x] 서버가 실행 파일 위치를 기준으로 `config/`·`data/`를 찾도록 수정 (U63) → (19)
 - [ ] jar·bat·jpackage zip을 만드는 빌드 스크립트, README 실행 방법
 - [ ] 발표자료(실행 화면 캡처 필요), 결과보고서
+
+## 2026-11-16 (19) — 서버 기준 폴더 (U63)
+
+- `AppHome`: exe(jpackage)로 실행하면 exe 폴더, jar로 실행하면 jar 폴더, IDE에서는 작업 폴더. `ServerMain`이 이 아래의 `config/`·`data/`를 쓰고, 관리 화면 로그에 실제 위치를 보여 준다.
+- **jpackage의 함정**: exe로 실행해도 jar는 exe 옆이 아니라 `app/` 폴더 안에 있다. jar 위치만 보면 `app/config/`가 생긴다. jpackage 실행기가 넣어 주는 `jpackage.app-path`(exe 경로)를 먼저 본다.
+- 확인: 규칙 검사 4개(서버 210 통과) + `AppHome`을 넣은 jar를 다른 폴더에서 `java -jar`로 실행해 jar 폴더가 잡히는 것을 확인.
 
